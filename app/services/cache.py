@@ -34,15 +34,28 @@ class TTLCache:
 
 
 class RateLimiter:
-    """Sliding-window limiter: at most `limit` hits per `window` seconds per key."""
+    """Sliding-window limiter: at most `limit` hits per `window` seconds per key.
 
-    def __init__(self, limit: int, window: float = 60.0):
+    Idle keys are swept out so memory stays bounded even with many different clients.
+    """
+
+    def __init__(self, limit: int, window: float = 60.0, max_keys: int = 10_000):
         self.limit = limit
         self.window = window
+        self.max_keys = max_keys
         self._hits: dict[str, deque] = {}
+
+    def _sweep(self, now: float) -> None:
+        stale = [k for k, q in self._hits.items() if not q or q[-1] <= now - self.window]
+        for k in stale:
+            del self._hits[k]
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
+        if key not in self._hits and len(self._hits) >= self.max_keys:
+            self._sweep(now)
+            if len(self._hits) >= self.max_keys:
+                return False
         hits = self._hits.setdefault(key, deque())
         while hits and hits[0] <= now - self.window:
             hits.popleft()

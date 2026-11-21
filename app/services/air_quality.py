@@ -8,8 +8,9 @@ comes from Open-Meteo.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from statistics import mean
 
 import httpx
@@ -89,7 +90,7 @@ def build_snapshot(raw: dict, now_utc: datetime | None = None) -> dict:
         raise AirDataError("No hourly air data returned")
 
     offset = timedelta(seconds=raw.get("utc_offset_seconds", 0))
-    now_utc = now_utc or datetime.now(timezone.utc)
+    now_utc = now_utc or datetime.now(UTC)
     now_local = (now_utc + offset).replace(tzinfo=None)
     stamps = [datetime.fromisoformat(t) for t in times]
 
@@ -234,9 +235,7 @@ async def fetch_google_current(lat: float, lon: float, client: httpx.AsyncClient
         "extraComputations": ["LOCAL_AQI", "POLLUTANT_CONCENTRATION", "DOMINANT_POLLUTANT_CONCENTRATION"],
         "languageCode": "en",
     }
-    resp = await client.post(
-        GOOGLE_AQ_URL, params={"key": settings.google_maps_api_key}, json=body, timeout=10.0
-    )
+    resp = await client.post(GOOGLE_AQ_URL, params={"key": settings.google_maps_api_key}, json=body, timeout=10.0)
     resp.raise_for_status()
     return parse_google_current(resp.json())
 
@@ -253,22 +252,28 @@ async def get_air(lat: float, lon: float, client: httpx.AsyncClient) -> dict:
         snapshot["source_label"] = "Demo data (sample winter smog, not live)"
         return snapshot
 
-    try:
-        raw = await fetch_open_meteo(lat, lon, client)
-    except httpx.HTTPError as exc:
-        raise AirDataError(f"Air data service unavailable: {exc.__class__.__name__}") from exc
+    # Fetch both sources at the same time when Google Air Quality is enabled.
+    tasks = [fetch_open_meteo(lat, lon, client)]
+    if settings.google_aq_enabled:
+        tasks.append(fetch_google_current(lat, lon, client))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    raw = results[0]
+    if isinstance(raw, httpx.HTTPError):
+        raise AirDataError(f"Air data service unavailable: {raw.__class__.__name__}") from raw
+    if isinstance(raw, BaseException):
+        raise raw
     snapshot = build_snapshot(raw)
 
-    if settings.google_aq_enabled:
-        try:
-            google = await fetch_google_current(lat, lon, client)
-            if google.get("india_aqi"):
-                snapshot["india_aqi"] = google["india_aqi"]
-                snapshot["current"].update({k: v for k, v in google["current"].items() if v is not None})
-                snapshot["source"] = "google+open-meteo"
-                snapshot["source_label"] = "Google Air Quality API (now) + Open-Meteo (forecast)"
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            log.warning("Google Air Quality lookup failed, using Open-Meteo only: %s", exc)
+    if len(results) > 1:
+        google = results[1]
+        if isinstance(google, BaseException):
+            log.warning("Google Air Quality lookup failed, using Open-Meteo only: %s", google)
+        elif google.get("india_aqi"):
+            snapshot["india_aqi"] = google["india_aqi"]
+            snapshot["current"].update({k: v for k, v in google["current"].items() if v is not None})
+            snapshot["source"] = "google+open-meteo"
+            snapshot["source_label"] = "Google Air Quality API (now) + Open-Meteo (forecast)"
 
     _cache.set(key, snapshot)
     return snapshot

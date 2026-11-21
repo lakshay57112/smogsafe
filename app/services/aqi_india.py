@@ -89,7 +89,7 @@ def sub_index(pollutant: str, concentration: float | None) -> int | None:
     if concentration < 0:
         return None
     bands = BREAKPOINTS[pollutant]
-    for (c_lo, c_hi), (i_lo, i_hi) in zip(bands, INDEX_BANDS):
+    for (c_lo, c_hi), (i_lo, i_hi) in zip(bands, INDEX_BANDS, strict=True):
         if concentration <= c_hi:
             value = (i_hi - i_lo) / (c_hi - c_lo) * (concentration - c_lo) + i_lo
             return round(value)

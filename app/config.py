@@ -19,9 +19,7 @@ def _env(name: str, default: str = "") -> str:
 class Settings:
     gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
     gemini_model: str = field(default_factory=lambda: _env("GEMINI_MODEL", "gemini-3.5-flash"))
-    gemini_fallback_model: str = field(
-        default_factory=lambda: _env("GEMINI_FALLBACK_MODEL", "gemini-flash-latest")
-    )
+    gemini_fallback_model: str = field(default_factory=lambda: _env("GEMINI_FALLBACK_MODEL", "gemini-flash-latest"))
     # Optional: Google Air Quality API (500 m resolution, returns the official CPCB index)
     google_maps_api_key: str = field(default_factory=lambda: _env("GOOGLE_MAPS_API_KEY"))
     db_path: str = field(default_factory=lambda: _env("DB_PATH", "data/smogsafe.db"))
@@ -31,6 +29,10 @@ class Settings:
     # Demo mode serves realistic sample air data (clearly labelled) when you have no internet at a venue.
     demo_mode: bool = field(default_factory=lambda: _env("DEMO_MODE", "false").lower() in {"1", "true", "yes"})
     ai_requests_per_minute: int = field(default_factory=lambda: int(_env("AI_REQUESTS_PER_MINUTE", "12")))
+
+    @property
+    def device_salt_is_default(self) -> bool:
+        return self.device_salt in {"", "change-me", "change-me-in-production"}
 
     @property
     def ai_enabled(self) -> bool:

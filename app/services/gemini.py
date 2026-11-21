@@ -189,9 +189,7 @@ class GeminiService:
         return AIPlan.model_validate_json(resp.text or "{}")
 
     async def ask(self, question: str, context: dict, history: list[dict], language: str) -> dict:
-        contents = [
-            types.Content(role=turn["role"], parts=[types.Part(text=turn["text"])]) for turn in history
-        ]
+        contents = [types.Content(role=turn["role"], parts=[types.Part(text=turn["text"])]) for turn in history]
         contents.append(types.Content(role="user", parts=[types.Part(text=question)]))
         system = ASK_SYSTEM.format(language=LANGUAGE_NAMES[language], context=json.dumps(context, ensure_ascii=False))
         grounded_config = types.GenerateContentConfig(
@@ -212,9 +210,7 @@ class GeminiService:
 
     async def advisories(self, place: str, state: str, today: str) -> dict:
         prompt = ADVISORY_PROMPT.format(place=place, state=f", {state}" if state else "", today=today)
-        config = types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())], temperature=0.2
-        )
+        config = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())], temperature=0.2)
         resp = await self._generate(prompt, config)
         grounded = extract_grounded(resp)
         # Bullets are shown without inline markers; sources are listed underneath.

@@ -50,6 +50,14 @@ def member_tips(member: dict, aqi: int, best_label: str | None) -> list[str]:
     return tips[:3]
 
 
+def _item(item: str, why: str) -> dict:
+    return {"item": item, "why": why}
+
+
+def _swap(swap_from: str, swap_to: str, why: str) -> dict:
+    return {"swap_from": swap_from, "swap_to": swap_to, "why": why}
+
+
 def _time_of_day(iso_start: str | None) -> str:
     if not iso_start:
         return "Evening"
@@ -73,78 +81,114 @@ def offline_plan(air: dict, household: dict, place: str) -> dict:
 
     actions = []
     if cat >= 2 and household.get("exercises_outdoors", True):
-        actions.append({
-            "time": "Morning", "category": "outdoor", "title": "Move your workout indoors",
-            "detail": "Do yoga, skipping or a home workout instead of a road-side run.",
-            "why": "You breathe 3x more air while running, so you pull in far more smoke.",
-            "impact_key": "skip_outdoor_exercise",
-        })
+        actions.append(
+            {
+                "time": "Morning",
+                "category": "outdoor",
+                "title": "Move your workout indoors",
+                "detail": "Do yoga, skipping or a home workout instead of a road-side run.",
+                "why": "You breathe 3x more air while running, so you pull in far more smoke.",
+                "impact_key": "skip_outdoor_exercise",
+            }
+        )
     if best and cat >= 2:
-        actions.append({
-            "time": "Anytime", "category": "outdoor", "title": f"Plan errands for {best}",
-            "detail": "Group outdoor tasks such as shopping or the school pick-up into the cleanest window.",
-            "why": "Smog is usually trapped near the ground on winter mornings and at night.",
-            "impact_key": "shift_to_clean_hours",
-        })
+        actions.append(
+            {
+                "time": "Anytime",
+                "category": "outdoor",
+                "title": f"Plan errands for {best}",
+                "detail": "Group outdoor tasks such as shopping or the school pick-up into the cleanest window.",
+                "why": "Smog is usually trapped near the ground on winter mornings and at night.",
+                "impact_key": "shift_to_clean_hours",
+            }
+        )
     if mode in {"car_solo", "car_pool", "cab", "two_wheeler", "auto"}:
-        actions.append({
-            "time": "Morning", "category": "commute", "title": "Take the metro or bus today",
-            "detail": "If a route exists, swap one leg of your commute to public transport or a carpool.",
-            "why": "Fewer engines means less smoke for everyone on your road.",
-            "impact_key": "commute_switch",
-        })
+        actions.append(
+            {
+                "time": "Morning",
+                "category": "commute",
+                "title": "Take the metro or bus today",
+                "detail": "If a route exists, swap one leg of your commute to public transport or a carpool.",
+                "why": "Fewer engines means less smoke for everyone on your road.",
+                "impact_key": "commute_switch",
+            }
+        )
     if cat >= 3:
-        actions.append({
-            "time": "Anytime", "category": "health", "title": "Wear a fitted N95 outside",
-            "detail": "Pinch the nose clip and check for leaks. Cloth masks barely help against PM2.5.",
-            "why": "A good fit matters more than the brand.",
-            "impact_key": "wear_n95",
-        })
-    actions.append({
-        "time": _time_of_day((air.get("worst_window") or {}).get("start")),
-        "category": "indoor",
-        "title": f"Keep windows shut {'around ' + worst if worst else 'in the evening and at night'}",
-        "detail": "Air out the house during the cleanest hours instead.",
-        "why": "Smog gets trapped near the ground at night and in the early morning in winter.",
-        "impact_key": "close_windows",
-    })
+        actions.append(
+            {
+                "time": "Anytime",
+                "category": "health",
+                "title": "Wear a fitted N95 outside",
+                "detail": "Pinch the nose clip and check for leaks. Cloth masks barely help against PM2.5.",
+                "why": "A good fit matters more than the brand.",
+                "impact_key": "wear_n95",
+            }
+        )
+    actions.append(
+        {
+            "time": _time_of_day((air.get("worst_window") or {}).get("start")),
+            "category": "indoor",
+            "title": f"Keep windows shut {'around ' + worst if worst else 'in the evening and at night'}",
+            "detail": "Air out the house during the cleanest hours instead.",
+            "why": "Smog gets trapped near the ground at night and in the early morning in winter.",
+            "impact_key": "close_windows",
+        }
+    )
     if household.get("has_purifier"):
-        actions.append({
-            "time": "Night", "category": "indoor", "title": "Run the purifier in the bedroom",
-            "detail": "Close the door and run it on high for an hour, then auto through the night.",
-            "why": "You spend 8 hours breathing that one room's air.",
-            "impact_key": "use_purifier",
-        })
-    actions.append({
-        "time": "Evening", "category": "cooking", "title": "Cook with the lid on and the exhaust running",
-        "detail": "Go easy on deep-frying and tadka on smoggy days.",
-        "why": "Cooking smoke adds to the outdoor smog that seeps inside.",
-        "impact_key": "clean_cooking",
-    })
-    actions.append({
-        "time": "Anytime", "category": "community", "title": "Say no to burning leaves or garbage",
-        "detail": "Report open burning in your area on the CPCB Sameer app.",
-        "why": "Street-level smoke hits kids and elders first.",
-        "impact_key": "avoid_burning",
-    })
+        actions.append(
+            {
+                "time": "Night",
+                "category": "indoor",
+                "title": "Run the purifier in the bedroom",
+                "detail": "Close the door and run it on high for an hour, then auto through the night.",
+                "why": "You spend 8 hours breathing that one room's air.",
+                "impact_key": "use_purifier",
+            }
+        )
+    actions.append(
+        {
+            "time": "Evening",
+            "category": "cooking",
+            "title": "Cook with the lid on and the exhaust running",
+            "detail": "Go easy on deep-frying and tadka on smoggy days.",
+            "why": "Cooking smoke adds to the outdoor smog that seeps inside.",
+            "impact_key": "clean_cooking",
+        }
+    )
+    actions.append(
+        {
+            "time": "Anytime",
+            "category": "community",
+            "title": "Say no to burning leaves or garbage",
+            "detail": "Report open burning in your area on the CPCB Sameer app.",
+            "why": "Street-level smoke hits kids and elders first.",
+            "impact_key": "avoid_burning",
+        }
+    )
 
     family = []
     for m in household.get("members", []):
         family.append({"member_id": m["id"], "advice": member_tips(m, aqi, best)})
 
     checklist = [
-        {"item": "Wet-mop floors and wipe surfaces instead of sweeping", "why": "A dry broom kicks settled dust back into the air."},
-        {"item": "Seal window gaps with tape or a door snake", "why": "Gaps let smog leak in all night."},
-        {"item": "No incense, dhoop or mosquito coils indoors", "why": "They add smoke right where you breathe."},
-        {"item": "Run the kitchen exhaust while cooking", "why": "It removes cooking particles at the source."},
+        _item("Wet-mop floors and wipe surfaces instead of sweeping", "A dry broom kicks dust back into the air."),
+        _item("Seal window gaps with tape or a door snake", "Gaps let smog leak in all night."),
+        _item("No incense, dhoop or mosquito coils indoors", "They add smoke right where you breathe."),
+        _item("Run the kitchen exhaust while cooking", "It removes cooking particles at the source."),
     ]
     if household.get("cooking_fuel") in {"biomass", "kerosene"}:
-        checklist.insert(0, {"item": "Cook near an open door with a chimney, or switch to LPG if possible", "why": "Wood and kerosene smoke is far worse than LPG."})
+        checklist.insert(
+            0,
+            _item(
+                "Cook near an open door with a chimney, or switch to LPG if possible",
+                "Wood and kerosene smoke is far worse than LPG.",
+            ),
+        )
 
     swaps = [
-        {"swap_from": "Morning road-side walk", "swap_to": "Indoor yoga or a mall walk", "why": "Same exercise, much cleaner air."},
-        {"swap_from": "Driving alone", "swap_to": "Metro, bus or carpool", "why": "Cuts CO₂ and traffic smoke."},
-        {"swap_from": "Burning dry leaves", "swap_to": "Composting them", "why": "No smoke, and free fertiliser."},
+        _swap("Morning road-side walk", "Indoor yoga or a mall walk", "Same exercise, much cleaner air."),
+        _swap("Driving alone", "Metro, bus or carpool", "Cuts CO₂ and traffic smoke."),
+        _swap("Burning dry leaves", "Composting them", "No smoke, and free fertiliser."),
     ]
 
     order = {"Morning": 0, "Afternoon": 1, "Evening": 2, "Night": 3, "Anytime": 4}

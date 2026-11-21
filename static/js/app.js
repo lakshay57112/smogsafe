@@ -25,6 +25,7 @@ const MODE_LABELS = {
 };
 const POLLUTING_MODES = ['car_solo', 'car_pool', 'cab', 'auto', 'two_wheeler'];
 const LANG_NAMES = { en: 'English', hi: 'Hindi', hinglish: 'Hinglish' };
+const LANG_CODES = { en: 'en', hi: 'hi', hinglish: 'hi-Latn' };
 const DEFAULT_CHECKLIST = [
   { item: 'Wet-mop floors instead of sweeping', why: 'A dry broom kicks settled dust back into the air.' },
   { item: 'Keep windows shut during the smoggiest hours', why: 'Air out the house in the cleanest window instead.' },
@@ -572,7 +573,7 @@ function restorePlanIfFresh() {
   if (saved && saved.key === locKey() && saved.date === todayStr()) {
     state.plan = saved.plan;
     renderPlan(saved.plan);
-    $('#make-plan').textContent = '✨ Remake my plan';
+    $('#make-plan-label').textContent = 'Remake my plan';
   }
 }
 
@@ -585,7 +586,7 @@ async function generatePlan() {
   const btn = $('#make-plan');
   const famBtn = $('#refresh-family');
   [btn, famBtn].forEach((b) => { b.disabled = true; });
-  btn.textContent = '✨ Making your plan…';
+  $('#make-plan-label').textContent = 'Making your plan…';
   const out = $('#plan-output');
   out.setAttribute('aria-busy', 'true');
   fill(out, h('div', { class: 'card' }, h('p', { class: 'muted', text: 'Reading the air and planning your day…' }), ...skeletonLines(5)));
@@ -610,23 +611,27 @@ async function generatePlan() {
     renderFamilyAdvice();
   } finally {
     [btn, famBtn].forEach((b) => { b.disabled = false; });
-    btn.textContent = '✨ Remake my plan';
+    $('#make-plan-label').textContent = 'Remake my plan';
     out.removeAttribute('aria-busy');
   }
 }
 
+// Emoji are decoration: hide them from screen readers so only the words are read out.
+const icon = (e) => h('span', { 'aria-hidden': 'true', text: `${e} ` });
+const badge = (cls, e, text) => h('span', { class: cls, role: 'listitem' }, icon(e), text);
+
 function impactBlock(imp) {
   const badges = [];
   if (imp.kind === 'exposure') {
-    badges.push(h('span', { class: 'impact', role: 'listitem', text: `🫁 −${imp.exposure_cut_pct}% smog breathed` }));
+    badges.push(badge('impact', '🫁', `−${imp.exposure_cut_pct}% smog breathed`));
     if (imp.cigarettes_avoided >= 0.05) {
-      badges.push(h('span', { class: 'impact cig', role: 'listitem', text: `🚬 ${fmt(imp.cigarettes_avoided, 2)} cigarettes avoided` }));
+      badges.push(badge('impact cig', '🚬', `${fmt(imp.cigarettes_avoided, 2)} cigarettes avoided`));
     }
   } else if (imp.kind === 'emissions') {
-    badges.push(h('span', { class: 'impact co2', role: 'listitem', text: `🌍 ${fmt(imp.co2_saved_year_kg)} kg CO₂ saved a year` }));
+    badges.push(badge('impact co2', '🌍', `${fmt(imp.co2_saved_year_kg)} kg CO₂ saved a year`));
     badges.push(h('span', { class: 'impact', role: 'listitem', text: `−${imp.reduction_pct}% commute emissions` }));
   } else {
-    badges.push(h('span', { class: 'impact info', role: 'listitem', text: `ℹ️ ${imp.label}` }));
+    badges.push(badge('impact info', 'ℹ️', imp.label));
   }
   const details = h('details', { class: 'math' },
     h('summary', { text: imp.kind === 'qualitative' ? 'Why this matters' : 'How we worked this out' }),
@@ -640,7 +645,7 @@ function actionItem(a) {
   return h('li', { class: 'action' },
     h('div', { class: 'action-time' },
       h('span', { class: 'cat-icon', 'aria-hidden': 'true', text: CATEGORY_ICONS[a.category] || '•' }),
-      h('span', { text: `${TIME_ICONS[a.time] || ''} ${a.time}` })),
+      h('span', {}, icon(TIME_ICONS[a.time] || ''), a.time)),
     h('div', {},
       h('h3', { text: a.title }),
       h('p', { text: a.detail }),
@@ -687,6 +692,7 @@ function renderPlan(plan) {
   parts.push(h('article', { class: 'card' },
     h('h2', { class: 'h2', text: "🏠 Tonight's indoor-air checklist" }),
     h('ul', { class: 'checklist' }, checklistItems(plan.indoor_checklist, 'plan'))));
+  out.lang = plan.mode === 'ai' ? LANG_CODES[state.lang] : 'en';
   fill(out, ...parts);
 }
 
@@ -816,12 +822,13 @@ async function askQuestion(question) {
       },
     });
     typing.remove();
-    appendMsg('bot', [
+    const answer = appendMsg('bot', [
       renderRich(res.answer, res.sources),
       res.grounded === false ? h('p', { class: 'muted small', text: 'ℹ️ Answered without live Google Search, so it may miss very recent news.' }) : null,
       sourcesList(res.sources),
       res.suggestions_html ? searchChipsFrame(res.suggestions_html) : null,
     ]);
+    if (res.mode === 'ai') answer.lang = LANG_CODES[state.lang];
     state.chat.push({ role: 'user', text: q }, { role: 'model', text: res.answer.replace(/\[\d+\]/g, '').slice(0, 1900) });
   } catch (e) {
     typing.remove();

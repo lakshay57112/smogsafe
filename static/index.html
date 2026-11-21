@@ -16,7 +16,7 @@
 
   <header class="site-header">
     <div class="wrap header-inner">
-      <a class="brand" href="/" aria-label="SmogSafe home">
+      <a class="brand" href="/">
         <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
           <circle cx="20" cy="20" r="19" fill="#0f766e"/>
           <path d="M11 24c3-6 7-7 9-7s6 1 9 7" fill="none" stroke="#ecfdf5" stroke-width="2.6" stroke-linecap="round"/>
@@ -52,8 +52,8 @@
             <p class="welcome-title">Let's check the air you're breathing.</p>
             <p>Share your location or search your city to get your live Indian AQI and a plan for your family.</p>
             <div class="btn-row">
-              <button type="button" class="btn btn-primary" id="use-location">📍 Use my location</button>
-              <button type="button" class="btn btn-ghost" id="search-city">🔎 Search city</button>
+              <button type="button" class="btn btn-primary" id="use-location"><span aria-hidden="true">📍</span> Use my location</button>
+              <button type="button" class="btn btn-ghost" id="search-city"><span aria-hidden="true">🔎</span> Search city</button>
             </div>
           </div>
         </div>
@@ -71,17 +71,17 @@
     <!-- Tabs -->
     <nav class="tabs" aria-label="SmogSafe sections">
       <div role="tablist" aria-label="Sections" class="tablist" id="tablist">
-        <button role="tab" id="tab-plan" aria-controls="panel-plan" aria-selected="true" tabindex="0">🗓️ Today's plan</button>
-        <button role="tab" id="tab-family" aria-controls="panel-family" aria-selected="false" tabindex="-1">👨‍👩‍👧 Family</button>
-        <button role="tab" id="tab-whatif" aria-controls="panel-whatif" aria-selected="false" tabindex="-1">💬 What-if</button>
-        <button role="tab" id="tab-circle" aria-controls="panel-circle" aria-selected="false" tabindex="-1">🤝 Smog Circle</button>
+        <button role="tab" id="tab-plan" aria-controls="panel-plan" aria-selected="true" tabindex="0"><span aria-hidden="true">🗓️</span> Today's plan</button>
+        <button role="tab" id="tab-family" aria-controls="panel-family" aria-selected="false" tabindex="-1"><span aria-hidden="true">👨‍👩‍👧</span> Family</button>
+        <button role="tab" id="tab-whatif" aria-controls="panel-whatif" aria-selected="false" tabindex="-1"><span aria-hidden="true">💬</span> What-if</button>
+        <button role="tab" id="tab-circle" aria-controls="panel-circle" aria-selected="false" tabindex="-1"><span aria-hidden="true">🤝</span> Smog Circle</button>
       </div>
     </nav>
 
     <!-- Today's plan -->
     <section role="tabpanel" id="panel-plan" aria-labelledby="tab-plan" class="panel" tabindex="0">
       <details class="card household" id="household-details">
-        <summary><span class="summary-title">🏠 Your household</span> <span class="muted" id="household-summary">Tell us a little so tips fit your life</span></summary>
+        <summary><span class="summary-title"><span aria-hidden="true">🏠</span> Your household</span> <span class="muted" id="household-summary">Tell us a little so tips fit your life</span></summary>
         <form id="household-form" class="form-grid" novalidate>
           <div class="field">
             <label for="hh-commute">Daily commute</label>
@@ -134,7 +134,7 @@
           <h2 class="h2">Your smog plan for today</h2>
           <p class="muted">Built from live air data, your household and the cleanest hours ahead.</p>
         </div>
-        <button type="button" class="btn btn-primary btn-lg" id="make-plan">✨ Make my plan</button>
+        <button type="button" class="btn btn-primary btn-lg" id="make-plan"><span aria-hidden="true">✨</span> <span id="make-plan-label">Make my plan</span></button>
       </div>
 
       <div id="plan-output" class="plan-output" aria-live="polite"></div>
@@ -223,7 +223,7 @@
 
         <div class="stack">
           <article class="card calc">
-            <h2 class="h2">🚇 Commute switch</h2>
+            <h2 class="h2"><span aria-hidden="true">🚇</span> Commute switch</h2>
             <form id="commute-calc" class="form-grid compact" novalidate>
               <div class="field">
                 <label for="c-from">From</label>
@@ -246,7 +246,7 @@
           </article>
 
           <article class="card calc">
-            <h2 class="h2">🫁 Smog you breathe</h2>
+            <h2 class="h2"><span aria-hidden="true">🫁</span> Smog you breathe</h2>
             <form id="exposure-calc" class="form-grid compact" novalidate>
               <div class="field">
                 <label for="e-activity">Activity</label>
@@ -309,14 +309,14 @@
         <div class="stack">
           <article class="card">
             <div class="card-head">
-              <h2 class="h2">📰 Latest local advisories</h2>
+              <h2 class="h2"><span aria-hidden="true">📰</span> Latest local advisories</h2>
               <button type="button" class="btn btn-ghost btn-sm" id="refresh-advisories">Check now</button>
             </div>
             <p class="muted small">Found with live Google Search. Always confirm with official sources.</p>
             <div id="advisories" aria-live="polite"></div>
           </article>
           <article class="card">
-            <h2 class="h2">🙋 Act locally</h2>
+            <h2 class="h2"><span aria-hidden="true">🙋</span> Act locally</h2>
             <ul class="links">
               <li><strong>See burning? Report it</strong> on CPCB's <em>Sameer</em> app (search "Sameer CPCB" on your app store).</li>
               <li><strong>Official station readings:</strong> <a href="https://airquality.cpcb.gov.in/AQI_India/" target="_blank" rel="noopener noreferrer">CPCB AQI dashboard</a></li>
@@ -344,7 +344,7 @@
         <h2 id="city-dialog-title" class="h2">Choose your city</h2>
         <button type="submit" value="cancel" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <button type="button" class="btn btn-ghost full" id="dialog-use-location">📍 Use my current location</button>
+      <button type="button" class="btn btn-ghost full" id="dialog-use-location"><span aria-hidden="true">📍</span> Use my current location</button>
       <label for="city-input">Search Indian cities</label>
       <input id="city-input" type="search" autocomplete="off" placeholder="e.g. Lucknow, Gurugram, Ludhiana" maxlength="60">
       <ul id="city-results" class="city-results" aria-label="Matching cities" aria-live="polite"></ul>

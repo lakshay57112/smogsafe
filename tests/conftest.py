@@ -11,20 +11,40 @@ class FakeGemini:
 
     def __init__(self):
         self.last_context = None
+        self.plan_calls = 0
 
     async def daily_plan(self, context, language):
         self.last_context = context
+        self.plan_calls += 1
         member_ids = [m["member_id"] for m in (context["household"] or {}).get("members", [])]
         return AIPlan(
             headline="Very poor air today, plan around 2–4 PM",
             summary="Keep mornings indoors and use the afternoon window.",
             actions=[
-                AIAction(time="Morning", category="outdoor", title="Workout indoors", detail="Yoga at home.",
-                         why="Morning smog is the worst.", impact_key="skip_outdoor_exercise"),
-                AIAction(time="Morning", category="commute", title="Take the metro", detail="Leave the car.",
-                         why="Fewer engines.", impact_key="commute_switch"),
-                AIAction(time="Evening", category="cooking", title="Lid on", detail="Exhaust on.",
-                         why="Less smoke.", impact_key="none"),
+                AIAction(
+                    time="Morning",
+                    category="outdoor",
+                    title="Workout indoors",
+                    detail="Yoga at home.",
+                    why="Morning smog is the worst.",
+                    impact_key="skip_outdoor_exercise",
+                ),
+                AIAction(
+                    time="Morning",
+                    category="commute",
+                    title="Take the metro",
+                    detail="Leave the car.",
+                    why="Fewer engines.",
+                    impact_key="commute_switch",
+                ),
+                AIAction(
+                    time="Evening",
+                    category="cooking",
+                    title="Lid on",
+                    detail="Exhaust on.",
+                    why="Less smoke.",
+                    impact_key="none",
+                ),
             ],
             family=[AIMemberAdvice(member_id=mid, advice=["Stay in", "N95 outside"]) for mid in member_ids],
             indoor_checklist=[AIChecklistItem(item="Wet mop", why="No dust")],
@@ -53,12 +73,13 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "google_maps_api_key", "")
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "test.db"))
 
-    from app.main import advisory_cache, ai_limiter, app, pledge_limiter
+    from app.main import advisory_cache, ai_limiter, api_limiter, app, plan_cache, pledge_limiter
     from app.services.air_quality import clear_cache
 
-    ai_limiter.reset()
-    pledge_limiter.reset()
+    for limiter in (ai_limiter, api_limiter, pledge_limiter):
+        limiter.reset()
     advisory_cache.clear()
+    plan_cache.clear()
     clear_cache()
     with TestClient(app) as c:
         yield c

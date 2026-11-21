@@ -7,8 +7,16 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 Mode = Literal[
-    "car_solo", "car_pool", "cab", "auto", "two_wheeler", "e_two_wheeler",
-    "bus", "metro", "walk_cycle", "work_from_home",
+    "car_solo",
+    "car_pool",
+    "cab",
+    "auto",
+    "two_wheeler",
+    "e_two_wheeler",
+    "bus",
+    "metro",
+    "walk_cycle",
+    "work_from_home",
 ]
 AgeGroup = Literal["infant", "child", "teen", "adult", "senior"]
 Condition = Literal["asthma", "copd", "heart", "diabetes", "pregnant", "allergies"]
@@ -117,8 +125,16 @@ class PledgeRequest(BaseModel):
 # --- Shape Gemini must return for the daily plan (used as response_schema) ---
 
 ImpactKey = Literal[
-    "skip_outdoor_exercise", "shift_to_clean_hours", "wear_n95", "close_windows", "use_purifier",
-    "commute_switch", "avoid_incense", "avoid_burning", "clean_cooking", "none",
+    "skip_outdoor_exercise",
+    "shift_to_clean_hours",
+    "wear_n95",
+    "close_windows",
+    "use_purifier",
+    "commute_switch",
+    "avoid_incense",
+    "avoid_burning",
+    "clean_cooking",
+    "none",
 ]
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -19,19 +20,11 @@ from app.services import geocode
 from app.services.air_quality import AirDataError, get_air
 from app.services.cache import RateLimiter, TTLCache
 from app.services.community import CommunityStore
+from app.services.context import air_brief, ask_factors, compact_impacts, household_brief, with_risk
 from app.services.gemini import SEARCH_BLOCKED_CODES, AIUnavailable, GeminiService
-from app.services.household import member_tips, member_risk, offline_plan
-from app.services.impact import (
-    BREATHING_M3_PER_HOUR,
-    CIGARETTE_PM25_UGM3,
-    CO2_KG_PER_PKM,
-    MASK_FACTOR,
-    SETTING_FACTOR,
-    commute_switch,
-    compare_exposure,
-    factors_table,
-    plan_impacts,
-)
+from app.services.household import offline_plan
+from app.services.impact import commute_switch, compare_exposure, factors_table, plan_impacts
+from app.services.planner import NOTICE_AI_BUSY, NOTICE_NO_AI, assemble_plan, plan_cache_key
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("smogsafe")
@@ -45,15 +38,37 @@ CSP = (
     "img-src 'self' data: https:; connect-src 'self'; frame-src 'self'; "
     "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 )
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(self), camera=(), microphone=()",
+    "X-Frame-Options": "DENY",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+}
 
-ai_limiter = RateLimiter(settings.ai_requests_per_minute, 60)
+api_limiter = RateLimiter(120, 60)  # every /api route, per client
+ai_limiter = RateLimiter(settings.ai_requests_per_minute, 60)  # Gemini-backed routes
 pledge_limiter = RateLimiter(20, 60)
 advisory_cache = TTLCache(30 * 60)
+plan_cache = TTLCache(15 * 60, max_items=256)
 
 OFFICIAL_SOURCES = [
     {"n": 1, "title": "CPCB live AQI dashboard", "uri": "https://airquality.cpcb.gov.in/AQI_India/"},
     {"n": 2, "title": "CAQM (GRAP orders for Delhi NCR)", "uri": "https://caqm.nic.in/"},
 ]
+NO_KEY_ANSWER = (
+    "The AI chat needs a Gemini API key on the server. Meanwhile, the calculators next to this chat "
+    "show the impact of common choices."
+)
+NO_KEY_ADVISORY = (
+    "Live advisories need the AI key. Meanwhile, check CPCB's Sameer app or your state pollution board "
+    "for official alerts."
+)
+OFFICIAL_ALERTS_TIP = (
+    "For official alerts, check CPCB's Sameer app, your State Pollution Control Board, or CAQM's GRAP orders "
+    "if you're in Delhi NCR."
+)
 
 
 @asynccontextmanager
@@ -61,37 +76,24 @@ async def lifespan(app: FastAPI):
     app.state.http = httpx.AsyncClient(headers={"User-Agent": "SmogSafe/1.0"}, follow_redirects=True)
     app.state.gemini = GeminiService(settings.gemini_api_key, settings.gemini_model, settings.gemini_fallback_model)
     app.state.community = CommunityStore(settings.db_path, settings.device_salt)
+    if settings.device_salt_is_default:
+        log.warning("DEVICE_SALT is the default value; set your own in production.")
     log.info("SmogSafe ready (AI: %s, Google AQ: %s)", settings.ai_enabled, settings.google_aq_enabled)
     yield
     await app.state.http.aclose()
+    app.state.community.close()
 
 
 app = FastAPI(
     title="SmogSafe API",
     description="Smog-season companion for Indian families.",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url=None,
     openapi_url="/api/openapi.json",
 )
-
-
-@app.middleware("http")
-async def security_and_limits(request: Request, call_next):
-    length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > MAX_BODY_BYTES:
-        return JSONResponse({"detail": "Request too large"}, status_code=413)
-    response = await call_next(request)
-    if not request.url.path.startswith("/api/docs"):
-        response.headers["Content-Security-Policy"] = CSP
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(self), camera=(), microphone=()"
-    response.headers["X-Frame-Options"] = "DENY"
-    if request.url.path.startswith("/api/"):
-        response.headers.setdefault("Cache-Control", "no-store")
-    return response
+app.add_middleware(GZipMiddleware, minimum_size=800)
 
 
 def client_ip(request: Request) -> str:
@@ -99,6 +101,28 @@ def client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def security_and_limits(request: Request, call_next):
+    path = request.url.path
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > MAX_BODY_BYTES:
+        return JSONResponse({"detail": "Request too large"}, status_code=413)
+    if path.startswith("/api/") and path != "/api/health" and not api_limiter.allow(client_ip(request)):
+        return JSONResponse({"detail": "Too many requests. Please wait a minute and try again."}, status_code=429)
+
+    response = await call_next(request)
+    if not path.startswith("/api/docs"):
+        response.headers["Content-Security-Policy"] = CSP
+    response.headers.update(SECURITY_HEADERS)
+    if request.headers.get("x-forwarded-proto", request.url.scheme) == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    elif path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
 
 
 def check_rate(limiter: RateLimiter, request: Request) -> None:
@@ -111,56 +135,12 @@ async def load_air(request: Request, lat: float, lon: float) -> dict:
         return await get_air(lat, lon, request.app.state.http)
     except AirDataError as exc:
         log.warning("Air data failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Live air data is unavailable right now. Please try again shortly.")
-
-
-def air_brief(air: dict) -> dict:
-    a = air["india_aqi"]
-    return {
-        "indian_aqi": a["value"],
-        "category": a["category"],
-        "health_note": a["health"],
-        "dominant_pollutant": a["dominant_label"],
-        "pm2_5_now_ugm3": air["current"].get("pm2_5"),
-        "pm2_5_24h_avg_ugm3": air["avg24"].get("pm2_5"),
-        "cigarettes_equivalent_today": air["cigarettes_today"],
-        "best_window": air.get("best_window"),
-        "worst_window": air.get("worst_window"),
-        "next_24h_pm2_5_every_3h": [[f["hour_label"], f["pm2_5"]] for f in air["forecast"][::3]],
-        "local_time": air["updated_local"],
-        "data_note": "Model-based estimate; official CPCB station readings may differ.",
-    }
-
-
-def compact_impacts(impacts: dict) -> dict:
-    keep = ("label", "kind", "exposure_cut_pct", "cigarettes_avoided", "co2_saved_year_kg", "explanation")
-    return {k: {f: v[f] for f in keep if f in v} for k, v in impacts.items()}
-
-
-def household_brief(household: dict | None) -> dict | None:
-    if not household:
-        return None
-    return {
-        "members": [
-            {
-                "member_id": m["id"],
-                "name": m["name"],
-                "age_group": m["age_group"],
-                "conditions": m["conditions"],
-                "outdoor_time": m["outdoor_time"],
-                "risk_level": m.get("risk"),
-            }
-            for m in household.get("members", [])
-        ],
-        "commute": f"{household['commute_mode']}, {household['commute_km']} km one way, {household['commute_days']} days/week",
-        "cooking_fuel": household["cooking_fuel"],
-        "has_air_purifier": household["has_purifier"],
-        "lives_near_busy_road": household["near_busy_road"],
-        "exercises_outdoors": household["exercises_outdoors"],
-    }
+        detail = "Live air data is unavailable right now. Please try again shortly."
+        raise HTTPException(status_code=503, detail=detail) from exc
 
 
 # --- Routes ------------------------------------------------------------------
+
 
 @app.get("/api/health")
 async def health():
@@ -176,8 +156,8 @@ async def air(request: Request, lat: float = Query(ge=-90, le=90), lon: float = 
 async def geocode_search(request: Request, q: str = Query(min_length=2, max_length=60)):
     try:
         return {"results": await geocode.search_city(q, request.app.state.http)}
-    except httpx.HTTPError:
-        raise HTTPException(status_code=503, detail="City search is unavailable right now.")
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="City search is unavailable right now.") from exc
 
 
 @app.get("/api/geocode/reverse")
@@ -195,7 +175,9 @@ async def impact_factors():
 
 @app.post("/api/impact/exposure")
 async def impact_exposure(req: ExposureRequest):
-    return compare_exposure(req.pm25, req.minutes, req.activity, req.from_setting, req.to_setting, req.from_mask, req.to_mask)
+    return compare_exposure(
+        req.pm25, req.minutes, req.activity, req.from_setting, req.to_setting, req.from_mask, req.to_mask
+    )
 
 
 @app.post("/api/impact/commute")
@@ -206,16 +188,18 @@ async def impact_commute(req: CommuteRequest):
 @app.post("/api/plan")
 async def plan(req: PlanRequest, request: Request):
     check_rate(ai_limiter, request)
-    air_data = await load_air(request, req.lat, req.lon)
     household = req.household.model_dump()
-    aqi = air_data["india_aqi"]["value"]
-    for m in household["members"]:
-        m["risk"] = member_risk(aqi, m)
+    cache_key = plan_cache_key(req.lat, req.lon, req.place_name, household, req.language)
+    cached = plan_cache.get(cache_key)
+    if cached:
+        return cached
+
+    air_data = await load_air(request, req.lat, req.lon)
+    with_risk(household, air_data["india_aqi"]["value"])
     impacts = plan_impacts(air_data, household)
 
     gemini: GeminiService = request.app.state.gemini
-    mode, notice = "ai", None
-    raw = None
+    raw, notice = None, NOTICE_NO_AI
     if gemini.available:
         context = {
             "place": req.place_name,
@@ -224,46 +208,17 @@ async def plan(req: PlanRequest, request: Request):
             "impacts": compact_impacts(impacts),
         }
         try:
-            raw = (await gemini.daily_plan(context, req.language)).model_dump()
+            raw, notice = (await gemini.daily_plan(context, req.language)).model_dump(), None
         except (AIUnavailable, ValidationError, ValueError) as exc:
             log.warning("AI plan failed, using offline plan: %s", exc)
-            notice = "The AI is busy right now, so these are SmogSafe's built-in tips for today's air."
-    else:
-        notice = "AI is not configured, so these are SmogSafe's built-in tips for today's air."
-    if raw is None:
-        mode = "offline"
-        raw = offline_plan(air_data, household, req.place_name)
+            notice = NOTICE_AI_BUSY
 
-    actions = []
-    for a in raw["actions"][:8]:
-        key = a.get("impact_key", "none")
-        actions.append({**a, "impact": impacts.get(key) if key != "none" else None})
-
-    advice = {f["member_id"]: f["advice"] for f in raw.get("family", [])}
-    best_label = (air_data.get("best_window") or {}).get("label")
-    family = [
-        {
-            "member_id": m["id"],
-            "name": m["name"],
-            "age_group": m["age_group"],
-            "conditions": m["conditions"],
-            "risk_level": m["risk"],
-            "advice": (advice.get(m["id"]) or member_tips(m, aqi, best_label))[:4],
-        }
-        for m in household["members"]
-    ]
-    return {
-        "mode": mode,
-        "notice": notice,
-        "headline": raw["headline"],
-        "summary": raw["summary"],
-        "actions": actions,
-        "family": family,
-        "indoor_checklist": raw["indoor_checklist"][:6],
-        "swaps": raw["swaps"][:3],
-        "air": air_brief(air_data),
-        "generated_at": datetime.now().isoformat(timespec="minutes"),
-    }
+    mode = "ai" if raw else "offline"
+    raw = raw or offline_plan(air_data, household, req.place_name)
+    result = assemble_plan(raw, impacts, household, air_data, mode, notice)
+    if mode == "ai":  # only cache real AI plans, so a temporary outage isn't remembered
+        plan_cache.set(cache_key, result)
+    return result
 
 
 @app.post("/api/ask")
@@ -271,37 +226,23 @@ async def ask(req: AskRequest, request: Request):
     check_rate(ai_limiter, request)
     gemini: GeminiService = request.app.state.gemini
     if not gemini.available:
-        return {
-            "mode": "offline",
-            "answer": "The AI chat needs a Gemini API key on the server. Meanwhile, the calculators next to this chat show the impact of common choices.",
-            "sources": [],
-            "search_queries": [],
-            "suggestions_html": "",
-        }
+        return {"mode": "offline", "answer": NO_KEY_ANSWER, "sources": [], "search_queries": [], "suggestions_html": ""}
+
     air_data = await load_air(request, req.lat, req.lon)
-    household = req.household.model_dump() if req.household else None
-    if household:
-        for m in household["members"]:
-            m["risk"] = member_risk(air_data["india_aqi"]["value"], m)
+    household = with_risk(req.household.model_dump() if req.household else None, air_data["india_aqi"]["value"])
     context = {
         "place": req.place_name,
         "air_today": air_brief(air_data),
         "household": household_brief(household),
         "precomputed_impacts": compact_impacts(plan_impacts(air_data, household or {})),
-        "factors": {
-            "cigarette_rule": f"{CIGARETTE_PM25_UGM3} µg/m³ of PM2.5 breathed for a day ≈ 1 cigarette (Berkeley Earth)",
-            "co2_kg_per_passenger_km": CO2_KG_PER_PKM,
-            "breathing_m3_per_hour": BREATHING_M3_PER_HOUR,
-            "indoor_share_of_outdoor_pm25": SETTING_FACTOR,
-            "mask_pass_through": MASK_FACTOR,
-        },
+        "factors": ask_factors(),
     }
     history = [t.model_dump() for t in req.history]
     try:
         result = await gemini.ask(req.question, context, history, req.language)
     except AIUnavailable as exc:
         log.warning("AI ask failed: %s", exc)
-        raise HTTPException(status_code=503, detail="The AI is busy right now. Please try again in a minute.")
+        raise HTTPException(status_code=503, detail="The AI is busy right now. Please try again in a minute.") from exc
     if not result["answer"]:
         result["answer"] = "Sorry, I couldn't put together an answer for that. Try asking it a little differently."
     return {"mode": "ai", **result}
@@ -313,20 +254,15 @@ async def advisories(
     city: str = Query(min_length=2, max_length=80),
     state: str = Query(default="", max_length=60),
 ):
-    city_c = " ".join(city.split())
-    state_c = " ".join(state.split())
+    city_c, state_c = " ".join(city.split()), " ".join(state.split())
     key = (city_c.lower(), state_c.lower())
     cached = advisory_cache.get(key)
     if cached:
         return cached
     gemini: GeminiService = request.app.state.gemini
     if not gemini.available:
-        return {
-            "mode": "offline",
-            "items": ["Live advisories need the AI key. Meanwhile, check CPCB's Sameer app or your state pollution board for official alerts."],
-            "sources": [],
-            "suggestions_html": "",
-        }
+        return {"mode": "offline", "items": [NO_KEY_ADVISORY], "sources": [], "suggestions_html": ""}
+
     check_rate(ai_limiter, request)
     try:
         result = await gemini.advisories(city_c, state_c, datetime.now().strftime("%d %B %Y"))
@@ -340,10 +276,7 @@ async def advisories(
         )
         return {
             "mode": "unavailable",
-            "items": [
-                reason,
-                "For official alerts, check CPCB's Sameer app, your State Pollution Control Board, or CAQM's GRAP orders if you're in Delhi NCR.",
-            ],
+            "items": [reason, OFFICIAL_ALERTS_TIP],
             "sources": OFFICIAL_SOURCES,
             "suggestions_html": "",
         }
@@ -367,8 +300,8 @@ def pledge(req: PledgeRequest, request: Request):
     store: CommunityStore = request.app.state.community
     try:
         added = store.add_pledge(req.city, req.pledge_id, req.device_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Unknown pledge")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Unknown pledge") from exc
     return {"added": added, **store.summary(req.city, req.device_id)}
 
 

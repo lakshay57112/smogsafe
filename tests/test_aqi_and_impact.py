@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -16,10 +16,11 @@ from app.services.impact import (
     plan_impacts,
 )
 
-NOW = datetime(2026, 11, 21, 9, 40, tzinfo=timezone.utc)  # 3:10 PM IST
+NOW = datetime(2026, 11, 21, 9, 40, tzinfo=UTC)  # 3:10 PM IST
 
 
 # --- Indian AQI ---------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "pollutant,conc,expected",
@@ -45,8 +46,10 @@ def test_sub_index_handles_missing_and_negative():
     assert sub_index("unknown", 10) is None
 
 
-@pytest.mark.parametrize("aqi,name", [(40, "Good"), (100, "Satisfactory"), (150, "Moderate"),
-                                      (250, "Poor"), (350, "Very Poor"), (480, "Severe")])
+@pytest.mark.parametrize(
+    "aqi,name",
+    [(40, "Good"), (100, "Satisfactory"), (150, "Moderate"), (250, "Poor"), (350, "Very Poor"), (480, "Severe")],
+)
 def test_categories(aqi, name):
     assert category_for(aqi)["name"] == name
 
@@ -60,6 +63,7 @@ def test_compute_aqi_picks_worst_pollutant():
 
 
 # --- Impact maths -------------------------------------------------------------
+
 
 def test_cigarette_rule():
     assert cigarettes_for_day(22) == 1.0
@@ -94,6 +98,7 @@ def test_plan_impacts_only_suggest_commute_switch_for_polluting_modes():
 
 
 # --- Air snapshot -------------------------------------------------------------
+
 
 def test_snapshot_from_sample_data():
     snap = build_snapshot(sample_open_meteo(28.6, 77.2, NOW), NOW)
@@ -130,6 +135,7 @@ def test_google_current_converts_ppb():
 
 # --- Household ------------------------------------------------------------------
 
+
 def test_member_risk_is_higher_for_sensitive_people():
     adult = {"age_group": "adult", "conditions": [], "outdoor_time": "medium"}
     nani = {"age_group": "senior", "conditions": ["asthma"], "outdoor_time": "medium"}
@@ -141,8 +147,13 @@ def test_member_risk_is_higher_for_sensitive_people():
 
 def test_offline_plan_shape():
     snap = build_snapshot(sample_open_meteo(28.6, 77.2, NOW), NOW)
-    hh = {"members": [{"id": "m1", "name": "Aarav", "age_group": "child", "conditions": [], "outdoor_time": "high"}],
-          "commute_mode": "car_solo", "has_purifier": True, "cooking_fuel": "lpg", "exercises_outdoors": True}
+    hh = {
+        "members": [{"id": "m1", "name": "Aarav", "age_group": "child", "conditions": [], "outdoor_time": "high"}],
+        "commute_mode": "car_solo",
+        "has_purifier": True,
+        "cooking_fuel": "lpg",
+        "exercises_outdoors": True,
+    }
     plan = offline_plan(snap, hh, "Delhi")
     assert 3 <= len(plan["actions"]) <= 7
     assert plan["family"][0]["member_id"] == "m1"
@@ -152,9 +163,10 @@ def test_offline_plan_shape():
 
 # --- Gemini helpers -------------------------------------------------------------
 
+
 def test_add_citations_uses_byte_offsets():
     text = "धुंध खराब है। Metro saves CO2."
-    first_end = len("धुंध खराब है।".encode("utf-8"))
+    first_end = len("धुंध खराब है।".encode())
     supports = [
         SimpleNamespace(segment=SimpleNamespace(end_index=first_end), grounding_chunk_indices=[0]),
         SimpleNamespace(segment=SimpleNamespace(end_index=len(text.encode())), grounding_chunk_indices=[1, 0]),
@@ -164,7 +176,9 @@ def test_add_citations_uses_byte_offsets():
 
 
 def test_extract_grounded_dedupes_sources():
-    web = lambda uri, title: SimpleNamespace(web=SimpleNamespace(uri=uri, title=title, domain=title))
+    def web(uri, title):
+        return SimpleNamespace(web=SimpleNamespace(uri=uri, title=title, domain=title))
+
     gm = SimpleNamespace(
         grounding_chunks=[web("https://a", "a.org"), web("https://a", "a.org"), web("https://b", "b.org")],
         grounding_supports=[SimpleNamespace(segment=SimpleNamespace(end_index=5), grounding_chunk_indices=[1, 2])],
@@ -186,6 +200,7 @@ def test_parse_bullets():
 
 # --- Community store ------------------------------------------------------------
 
+
 def test_pledges_are_deduplicated_per_device():
     store = CommunityStore(":memory:", "salt")
     assert store.add_pledge("delhi", "metro_2x", "device-aaaa-1111") is True
@@ -197,6 +212,7 @@ def test_pledges_are_deduplicated_per_device():
     assert summary["people_pledging_co2_kg_year"] == 2 * 239
     with pytest.raises(ValueError):
         store.add_pledge("Delhi", "not-a-pledge", "device-aaaa-1111")
+    store.close()
 
 
 def test_chat_falls_back_without_search_when_grounding_is_blocked():
@@ -212,7 +228,8 @@ def test_chat_falls_back_without_search_when_grounding_is_blocked():
         async def generate_content(self, model, contents, config):
             seen_tools.append(bool(config.tools))
             if config.tools:
-                raise errors.ClientError(403, {"error": {"code": 403, "message": "Search not allowed", "status": "PERMISSION_DENIED"}})
+                body = {"error": {"code": 403, "message": "Search not allowed", "status": "PERMISSION_DENIED"}}
+                raise errors.ClientError(403, body)
             return SimpleNamespace(text="Metro saves CO2.", candidates=[])
 
     svc = GeminiService("key", "model-a", "model-b")

@@ -17,10 +17,10 @@ UG_PER_CIGARETTE = CIGARETTE_PM25_UGM3 * DAILY_AIR_M3
 
 # Typical adult breathing rates (m3 of air per hour).
 BREATHING_M3_PER_HOUR = {
-    "rest": 0.5,       # sleeping, sitting
-    "light": 1.0,      # walking slowly, chores, waiting at a bus stop
-    "moderate": 1.6,   # brisk walk, cycling to work
-    "vigorous": 3.0,   # running, sports
+    "rest": 0.5,  # sleeping, sitting
+    "light": 1.0,  # walking slowly, chores, waiting at a bus stop
+    "moderate": 1.6,  # brisk walk, cycling to work
+    "vigorous": 3.0,  # running, sports
 }
 
 # Share of outdoor PM2.5 found in each setting (rough mid-range values).
@@ -41,14 +41,14 @@ MASK_FACTOR = {
 
 # kg CO2 per passenger-km. Mostly from TERI's Delhi per-passenger estimates (2023).
 CO2_KG_PER_PKM = {
-    "car_solo": 0.140,      # TERI private car 87.7 g/pkm at 1.6 occupancy = ~140 g per car-km
-    "car_pool": 0.070,      # same car shared by two people
-    "cab": 0.099,           # TERI cab/taxi
-    "auto": 0.064,          # TERI three-wheeler
-    "two_wheeler": 0.041,   # TERI two-wheeler
-    "e_two_wheeler": 0.017, # ITF: electric 2W emit ~28-57% of petrol ones
-    "bus": 0.029,           # TERI DTC/cluster bus
-    "metro": 0.025,         # TERI metro, midpoint of 20.7-29.3 g/pkm
+    "car_solo": 0.140,  # TERI private car 87.7 g/pkm at 1.6 occupancy = ~140 g per car-km
+    "car_pool": 0.070,  # same car shared by two people
+    "cab": 0.099,  # TERI cab/taxi
+    "auto": 0.064,  # TERI three-wheeler
+    "two_wheeler": 0.041,  # TERI two-wheeler
+    "e_two_wheeler": 0.017,  # ITF: electric 2W emit ~28-57% of petrol ones
+    "bus": 0.029,  # TERI DTC/cluster bus
+    "metro": 0.025,  # TERI metro, midpoint of 20.7-29.3 g/pkm
     "walk_cycle": 0.0,
     "work_from_home": 0.0,
 }
@@ -76,14 +76,24 @@ SETTING_LABELS = {
 MASK_LABELS = {"none": "no mask", "cloth": "a cloth mask", "surgical": "a surgical mask", "n95": "a well-fitted N95"}
 
 SOURCES = [
-    {"label": "Berkeley Earth: Air pollution and cigarette equivalence", "url": "https://berkeleyearth.org/air-pollution-and-cigarette-equivalence"},
-    {"label": "TERI: Per-passenger emissions of transport modes in Delhi", "url": "https://teriin.org/sites/default/transport/Per_passenger_emission_in_Delhi_Different_Modes.pdf"},
-    {"label": "ITF/OECD: Life-cycle assessment of passenger transport in India", "url": "https://www.itf-oecd.org/sites/default/files/docs/life-cycle-assessment-passenger-transport-india.pdf"},
+    {
+        "label": "Berkeley Earth: Air pollution and cigarette equivalence",
+        "url": "https://berkeleyearth.org/air-pollution-and-cigarette-equivalence",
+    },
+    {
+        "label": "TERI: Per-passenger emissions of transport modes in Delhi",
+        "url": "https://teriin.org/sites/default/transport/Per_passenger_emission_in_Delhi_Different_Modes.pdf",
+    },
+    {
+        "label": "ITF/OECD: Life-cycle assessment of passenger transport in India",
+        "url": "https://www.itf-oecd.org/sites/default/files/docs/life-cycle-assessment-passenger-transport-india.pdf",
+    },
     {"label": "CPCB: National Air Quality Index", "url": "https://cpcb.nic.in/national-air-quality-index/"},
 ]
 
 
 # --- Core calculations ------------------------------------------------------
+
 
 def cigarettes_for_day(avg_pm25: float | None) -> float | None:
     """Cigarette-equivalent of breathing this PM2.5 level for a full day."""
@@ -124,7 +134,8 @@ def compare_exposure(
     math = (
         f"{pm25:.0f} µg/m³ × {SETTING_FACTOR[from_setting]} (setting) × {MASK_FACTOR[from_mask]} (mask) × "
         f"{rate} m³/h × {minutes / 60:.2f} h = {before:.0f} µg  →  "
-        f"{after_pm:.0f} × {SETTING_FACTOR[to_setting]} × {MASK_FACTOR[to_mask]} × {rate} × {minutes / 60:.2f} = {after:.0f} µg"
+        f"{after_pm:.0f} × {SETTING_FACTOR[to_setting]} × {MASK_FACTOR[to_mask]} × {rate} × "
+        f"{minutes / 60:.2f} = {after:.0f} µg"
     )
     return {
         "dose_before_ug": round(before),
@@ -163,7 +174,8 @@ def commute_switch(from_mode: str, to_mode: str, km_one_way: float, days_per_wee
             f"{km_one_way:g} km × 2 × {days_per_week} days = {km_week:g} km/week. "
             f"{MODE_LABELS[from_mode]}: {CO2_KG_PER_PKM[from_mode]} kg/km → "
             f"{MODE_LABELS[to_mode]}: {CO2_KG_PER_PKM[to_mode]} kg/km. "
-            f"Saved = ({CO2_KG_PER_PKM[from_mode]} − {CO2_KG_PER_PKM[to_mode]}) × {km_week:g} = {saved_week:.2f} kg/week."
+            f"Saved = ({CO2_KG_PER_PKM[from_mode]} − {CO2_KG_PER_PKM[to_mode]}) × {km_week:g} "
+            f"= {saved_week:.2f} kg/week."
         ),
         "explanation": (
             f"Switching from {MODE_LABELS[from_mode].lower()} to {MODE_LABELS[to_mode].lower()} "
@@ -259,16 +271,25 @@ def plan_impacts(air: dict, household: dict) -> dict[str, dict]:
     impacts["avoid_incense"] = {
         "label": "No incense, dhoop or mosquito coils indoors",
         "kind": "qualitative",
-        "explanation": "Incense and coils release fine smoke right where you breathe. With windows shut in smog season, it builds up indoors.",
+        "explanation": (
+            "Incense and coils release fine smoke right where you breathe. "
+            "With windows shut in smog season, it builds up indoors."
+        ),
     }
     impacts["avoid_burning"] = {
         "label": "No burning of leaves or garbage",
         "kind": "qualitative",
-        "explanation": "Open burning releases several grams of fine particles per kg burned, right at street level where kids and elders breathe it.",
+        "explanation": (
+            "Open burning releases several grams of fine particles per kg burned, "
+            "right at street level where kids and elders breathe it."
+        ),
     }
     impacts["clean_cooking"] = {
         "label": "Lid on, exhaust on, less deep-frying",
         "kind": "qualitative",
-        "explanation": "Frying and tadka throw up a burst of fine particles. A chimney or exhaust fan with a lid on the pan removes most of it at the source.",
+        "explanation": (
+            "Frying and tadka throw up a burst of fine particles. "
+            "A chimney or exhaust fan with a lid on the pan removes most of it at the source."
+        ),
     }
     return impacts

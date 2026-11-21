@@ -10,7 +10,7 @@ import hashlib
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # Yearly CO2 numbers are rough per-household estimates; the note says what was assumed.
 PLEDGES = [
@@ -86,6 +86,10 @@ class CommunityStore:
         )
         self._conn.commit()
 
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
     @staticmethod
     def normalise_city(city: str) -> str:
         return " ".join(city.strip().split()).title()[:80]
@@ -98,10 +102,8 @@ class CommunityStore:
         if pledge_id not in PLEDGE_IDS:
             raise ValueError("Unknown pledge")
         with self._lock:
-            cur = self._conn.execute(
-                "INSERT OR IGNORE INTO pledges VALUES (?, ?, ?, ?)",
-                (self.normalise_city(city), pledge_id, self._hash(device_id), datetime.now(timezone.utc).isoformat()),
-            )
+            row = (self.normalise_city(city), pledge_id, self._hash(device_id), datetime.now(UTC).isoformat())
+            cur = self._conn.execute("INSERT OR IGNORE INTO pledges VALUES (?, ?, ?, ?)", row)
             self._conn.commit()
             return cur.rowcount == 1
 

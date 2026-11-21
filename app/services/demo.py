@@ -6,7 +6,7 @@ Only used when DEMO_MODE=true. The UI labels it as demo data.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 IST = timedelta(hours=5, minutes=30)
 
@@ -20,7 +20,7 @@ def _smog_curve(hour: float) -> float:
 
 
 def sample_open_meteo(lat: float, lon: float, now_utc: datetime | None = None) -> dict:
-    now_utc = now_utc or datetime.now(timezone.utc)
+    now_utc = now_utc or datetime.now(UTC)
     now_local = now_utc + IST
     start = (now_local - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
     # Small, stable variation per location so different cities don't look identical.

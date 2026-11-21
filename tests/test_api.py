@@ -75,7 +75,14 @@ def test_ask_offline_and_ai(client):
     assert r.json()["mode"] == "offline"
 
     client.app.state.gemini = __import__("tests.conftest", fromlist=["FakeGemini"]).FakeGemini()
-    r = client.post("/api/ask", json={**q, "household": HOUSEHOLD, "history": [{"role": "user", "text": "hi"}, {"role": "model", "text": "hello"}]})
+    r = client.post(
+        "/api/ask",
+        json={
+            **q,
+            "household": HOUSEHOLD,
+            "history": [{"role": "user", "text": "hi"}, {"role": "model", "text": "hello"}],
+        },
+    )
     body = r.json()
     assert body["mode"] == "ai"
     assert body["sources"][0]["uri"].startswith("https://")
@@ -87,22 +94,36 @@ def test_ask_rejects_empty_question(client):
 
 
 def test_impact_endpoints(client):
-    r = client.post("/api/impact/commute", json={"from_mode": "car_solo", "to_mode": "bus", "km_one_way": 10, "days_per_week": 5})
+    r = client.post(
+        "/api/impact/commute", json={"from_mode": "car_solo", "to_mode": "bus", "km_one_way": 10, "days_per_week": 5}
+    )
     assert r.status_code == 200 and r.json()["co2_saved_year_kg"] > 0
-    r = client.post("/api/impact/exposure", json={"pm25": 250, "minutes": 30, "activity": "vigorous", "to_setting": "indoors_with_purifier"})
+    r = client.post(
+        "/api/impact/exposure",
+        json={"pm25": 250, "minutes": 30, "activity": "vigorous", "to_setting": "indoors_with_purifier"},
+    )
     assert r.json()["exposure_cut_pct"] == 70
     assert "sources" in client.get("/api/impact/factors").json()
 
 
 def test_community_pledge_flow(client):
     device = "abcd1234-ef56-7890"
-    r = client.post("/api/community/pledge", json={"city": "Chandigarh", "pledge_id": "engine_off", "device_id": device})
+    r = client.post(
+        "/api/community/pledge", json={"city": "Chandigarh", "pledge_id": "engine_off", "device_id": device}
+    )
     assert r.status_code == 200 and r.json()["added"] is True
-    r = client.post("/api/community/pledge", json={"city": "chandigarh", "pledge_id": "engine_off", "device_id": device})
+    r = client.post(
+        "/api/community/pledge", json={"city": "chandigarh", "pledge_id": "engine_off", "device_id": device}
+    )
     assert r.json()["added"] is False
     summary = client.get("/api/community", params={"city": "Chandigarh", "device_id": device}).json()
     assert summary["total_pledges"] == 1
-    assert client.post("/api/community/pledge", json={"city": "Chandigarh", "pledge_id": "nope", "device_id": device}).status_code == 400
+    assert (
+        client.post(
+            "/api/community/pledge", json={"city": "Chandigarh", "pledge_id": "nope", "device_id": device}
+        ).status_code
+        == 400
+    )
 
 
 def test_advisories_offline_message(client):
@@ -111,7 +132,9 @@ def test_advisories_offline_message(client):
 
 
 def test_rate_limit(client, fake_gemini):
-    codes = [client.post("/api/ask", json={**DELHI, "question": "Is it safe to run today?"}).status_code for _ in range(15)]
+    codes = [
+        client.post("/api/ask", json={**DELHI, "question": "Is it safe to run today?"}).status_code for _ in range(15)
+    ]
     assert 429 in codes
 
 
@@ -136,3 +159,78 @@ def test_advisories_explain_when_search_is_blocked(client):
     assert body["mode"] == "unavailable"
     assert "free-tier" in body["items"][0]
     assert body["sources"][0]["uri"].startswith("https://")
+
+
+def test_extra_security_headers_and_hsts_behind_https(client):
+    r = client.get("/api/health", headers={"x-forwarded-proto": "https"})
+    assert r.headers["cross-origin-opener-policy"] == "same-origin"
+    assert r.headers["cross-origin-resource-policy"] == "same-origin"
+    assert "max-age" in r.headers["strict-transport-security"]
+    assert "strict-transport-security" not in client.get("/api/health").headers
+
+
+def test_responses_are_gzipped_and_static_files_cached(client):
+    r = client.get("/api/air", params={"lat": 28.61, "lon": 77.21}, headers={"accept-encoding": "gzip"})
+    assert r.headers["content-encoding"] == "gzip"
+    assert r.headers["cache-control"] == "no-store"
+    assert client.get("/static/js/app.js").headers["cache-control"] == "public, max-age=3600"
+
+
+def test_general_api_rate_limit(client, monkeypatch):
+    from app.main import api_limiter
+
+    monkeypatch.setattr(api_limiter, "limit", 3)
+    codes = [client.get("/api/impact/factors").status_code for _ in range(5)]
+    assert codes[:3] == [200, 200, 200] and codes[-1] == 429
+    assert client.get("/api/health").status_code == 200  # health checks are never limited
+
+
+def test_ai_plan_is_cached_for_identical_requests(client, fake_gemini):
+    body = {**DELHI, "household": HOUSEHOLD}
+    first = client.post("/api/plan", json=body).json()
+    second = client.post("/api/plan", json=body).json()
+    assert first == second
+    assert fake_gemini.plan_calls == 1
+    client.post("/api/plan", json={**body, "language": "hi"})
+    assert fake_gemini.plan_calls == 2
+
+
+def test_plan_falls_back_when_ai_fails(client):
+    from app.services.gemini import AIUnavailable
+
+    class Broken:
+        available = True
+
+        async def daily_plan(self, context, language):
+            raise AIUnavailable("Gemini error 503", 503)
+
+    client.app.state.gemini = Broken()
+    body = client.post("/api/plan", json={**DELHI, "household": HOUSEHOLD}).json()
+    assert body["mode"] == "offline"
+    assert "busy" in body["notice"]
+
+
+def test_geocode_endpoints_handle_upstream_errors(client, monkeypatch):
+    import httpx
+
+    from app.services import geocode
+
+    async def boom(*args, **kwargs):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(geocode, "search_city", boom)
+    monkeypatch.setattr(geocode, "reverse", boom)
+    assert client.get("/api/geocode/search", params={"q": "Pune"}).status_code == 503
+    assert client.get("/api/geocode/reverse", params={"lat": 18.5, "lon": 73.8}).json()["name"] == "Your location"
+
+
+def test_air_endpoint_reports_upstream_outage(client, monkeypatch):
+    from app import main
+    from app.services.air_quality import AirDataError
+
+    async def down(*args, **kwargs):
+        raise AirDataError("down")
+
+    monkeypatch.setattr(main, "get_air", down)
+    r = client.get("/api/air", params={"lat": 28.6, "lon": 77.2})
+    assert r.status_code == 503 and "unavailable" in r.json()["detail"]
