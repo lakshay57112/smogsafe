@@ -73,13 +73,15 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "google_maps_api_key", "")
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "test.db"))
 
-    from app.main import advisory_cache, ai_limiter, api_limiter, app, plan_cache, pledge_limiter
+    from app.main import app
+    from app.routers.ai import advisory_cache, plan_cache, suggestion_pages
+    from app.security import ai_limiter, api_limiter, pledge_limiter
     from app.services.air_quality import clear_cache
 
     for limiter in (ai_limiter, api_limiter, pledge_limiter):
         limiter.reset()
-    advisory_cache.clear()
-    plan_cache.clear()
+    for cache in (advisory_cache, plan_cache, suggestion_pages):
+        cache.clear()
     clear_cache()
     with TestClient(app) as c:
         yield c

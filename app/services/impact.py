@@ -226,70 +226,111 @@ GREENER_MODE = {
 }
 
 
-def plan_impacts(air: dict, household: dict) -> dict[str, dict]:
-    """Pre-compute the impact of each kind of action for this household and today's air.
-
-    The LLM only picks which impact_key fits an action; the numbers come from here.
-    """
-    avg_day = (air.get("avg24") or {}).get("pm2_5") or (air.get("current") or {}).get("pm2_5") or 0
-    periods = air.get("period_avgs") or {}
-    pm_morning = periods.get("morning") or avg_day
-    pm_night = periods.get("night") or avg_day
-    best = air.get("best_window") or {}
-    has_purifier = bool(household.get("has_purifier"))
-    indoor_target = "indoors_with_purifier" if has_purifier else "indoors_windows_closed"
-    impacts: dict[str, dict] = {}
-
-    if avg_day > 0:
-        ex = compare_exposure(pm_morning, 45, "moderate", "outdoors", indoor_target)
-        impacts["skip_outdoor_exercise"] = {"label": "45 min morning workout moved indoors", "kind": "exposure", **ex}
-        if best.get("avg_pm2_5") is not None and best["avg_pm2_5"] < pm_morning:
-            ex = compare_exposure(pm_morning, 60, "light", "outdoors", "outdoors", to_pm25=best["avg_pm2_5"])
-            impacts["shift_to_clean_hours"] = {
-                "label": f"1 hour of errands moved from morning to {best.get('label', 'the cleanest hours')}",
-                "kind": "exposure",
-                **ex,
-            }
-        ex = compare_exposure(avg_day, 60, "light", "outdoors", "outdoors", "none", "n95")
-        impacts["wear_n95"] = {"label": "1 hour outside with a fitted N95", "kind": "exposure", **ex}
-        ex = compare_exposure(pm_night, 8 * 60, "rest", "indoors_windows_open", "indoors_windows_closed")
-        impacts["close_windows"] = {"label": "Windows shut for 8 hours of sleep", "kind": "exposure", **ex}
-        ex = compare_exposure(pm_night, 8 * 60, "rest", "indoors_windows_closed", "indoors_with_purifier")
-        impacts["use_purifier"] = {"label": "Purifier running through the night", "kind": "exposure", **ex}
-
-    mode = household.get("commute_mode")
-    km = float(household.get("commute_km") or 0)
-    days = int(household.get("commute_days") or 0)
-    if mode in GREENER_MODE and km > 0 and days > 0:
-        sw = commute_switch(mode, GREENER_MODE[mode], km, days)
-        impacts["commute_switch"] = {
-            "label": f"{MODE_LABELS[mode]} → {MODE_LABELS[GREENER_MODE[mode]]}",
-            "kind": "emissions",
-            **sw,
-        }
-
-    impacts["avoid_incense"] = {
+QUALITATIVE_IMPACTS = {
+    "avoid_incense": {
         "label": "No incense, dhoop or mosquito coils indoors",
         "kind": "qualitative",
         "explanation": (
             "Incense and coils release fine smoke right where you breathe. "
             "With windows shut in smog season, it builds up indoors."
         ),
-    }
-    impacts["avoid_burning"] = {
+    },
+    "avoid_burning": {
         "label": "No burning of leaves or garbage",
         "kind": "qualitative",
         "explanation": (
             "Open burning releases several grams of fine particles per kg burned, "
             "right at street level where kids and elders breathe it."
         ),
-    }
-    impacts["clean_cooking"] = {
+    },
+    "clean_cooking": {
         "label": "Lid on, exhaust on, less deep-frying",
         "kind": "qualitative",
         "explanation": (
             "Frying and tadka throw up a burst of fine particles. "
             "A chimney or exhaust fan with a lid on the pan removes most of it at the source."
         ),
+    },
+}
+
+
+def _exposure(label: str, **kwargs) -> dict:
+    return {"label": label, "kind": "exposure", **compare_exposure(**kwargs)}
+
+
+def _exposure_impacts(air: dict, household: dict) -> dict[str, dict]:
+    """Smog-breathed savings, using the PM2.5 expected at the time each action happens."""
+    avg_day = (air.get("avg24") or {}).get("pm2_5") or (air.get("current") or {}).get("pm2_5") or 0
+    if avg_day <= 0:
+        return {}
+    periods = air.get("period_avgs") or {}
+    morning = periods.get("morning") or avg_day
+    night = periods.get("night") or avg_day
+    best = air.get("best_window") or {}
+    indoors = "indoors_with_purifier" if household.get("has_purifier") else "indoors_windows_closed"
+
+    impacts = {
+        "skip_outdoor_exercise": _exposure(
+            "45 min morning workout moved indoors",
+            pm25=morning,
+            minutes=45,
+            activity="moderate",
+            from_setting="outdoors",
+            to_setting=indoors,
+        ),
+        "wear_n95": _exposure(
+            "1 hour outside with a fitted N95",
+            pm25=avg_day,
+            minutes=60,
+            activity="light",
+            from_setting="outdoors",
+            to_setting="outdoors",
+            to_mask="n95",
+        ),
+        "close_windows": _exposure(
+            "Windows shut for 8 hours of sleep",
+            pm25=night,
+            minutes=480,
+            activity="rest",
+            from_setting="indoors_windows_open",
+            to_setting="indoors_windows_closed",
+        ),
+        "use_purifier": _exposure(
+            "Purifier running through the night",
+            pm25=night,
+            minutes=480,
+            activity="rest",
+            from_setting="indoors_windows_closed",
+            to_setting="indoors_with_purifier",
+        ),
     }
+    if best.get("avg_pm2_5") is not None and best["avg_pm2_5"] < morning:
+        impacts["shift_to_clean_hours"] = _exposure(
+            f"1 hour of errands moved from morning to {best.get('label', 'the cleanest hours')}",
+            pm25=morning,
+            minutes=60,
+            activity="light",
+            from_setting="outdoors",
+            to_setting="outdoors",
+            to_pm25=best["avg_pm2_5"],
+        )
     return impacts
+
+
+def _commute_impact(household: dict) -> dict[str, dict]:
+    mode = household.get("commute_mode")
+    km = float(household.get("commute_km") or 0)
+    days = int(household.get("commute_days") or 0)
+    if mode not in GREENER_MODE or km <= 0 or days <= 0:
+        return {}
+    greener = GREENER_MODE[mode]
+    label = f"{MODE_LABELS[mode]} → {MODE_LABELS[greener]}"
+    return {"commute_switch": {"label": label, "kind": "emissions", **commute_switch(mode, greener, km, days)}}
+
+
+def plan_impacts(air: dict, household: dict) -> dict[str, dict]:
+    """Pre-compute the impact of each kind of action for this household and today's air.
+
+    The LLM only picks which impact_key fits an action; the numbers come from here.
+    """
+    return {**_exposure_impacts(air, household), **_commute_impact(household), **QUALITATIVE_IMPACTS}

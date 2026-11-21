@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0f766e">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/css/styles.css">
-  <script type="module" src="/static/js/app.js"></script>
+  <script type="module" src="/static/js/main.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -150,7 +150,7 @@
           <form id="member-form" class="form-grid compact" novalidate>
             <div class="field">
               <label for="m-name">Name or nickname</label>
-              <input id="m-name" name="name" maxlength="40" required autocomplete="off" placeholder="e.g. Nani">
+              <input id="m-name" name="name" maxlength="40" required autocomplete="off" placeholder="e.g. Nani" aria-describedby="member-error" aria-invalid="false">
             </div>
             <div class="field">
               <label for="m-age">Age group</label>

@@ -170,3 +170,80 @@ class AIPlan(BaseModel):
     family: list[AIMemberAdvice]
     indoor_checklist: list[AIChecklistItem]
     swaps: list[AISwap]
+
+
+# --- Response models (documented in /api/docs and validated on the way out) ---
+
+
+class HealthOut(BaseModel):
+    status: str
+    ai_enabled: bool
+    google_aq_enabled: bool
+
+
+class ExposureOut(BaseModel):
+    dose_before_ug: int
+    dose_after_ug: int
+    dose_avoided_ug: int
+    exposure_cut_pct: int
+    cigarettes_before: float
+    cigarettes_after: float
+    cigarettes_avoided: float
+    math: str
+    explanation: str
+
+
+class CommuteOut(BaseModel):
+    km_per_week: float
+    co2_before_week_kg: float
+    co2_after_week_kg: float
+    co2_saved_week_kg: float
+    co2_saved_month_kg: float
+    co2_saved_year_kg: float
+    reduction_pct: int
+    if_1000_people_tonnes_year: float
+    math: str
+    explanation: str
+
+
+class PledgeItem(BaseModel):
+    id: str
+    icon: str
+    title: str
+    yearly_co2_kg: int | None
+    note: str
+    count: int
+    pledged_by_me: bool
+
+
+class CommunityOut(BaseModel):
+    city: str
+    total_pledges: int
+    people_pledging_co2_kg_year: int
+    pledges: list[PledgeItem]
+
+
+class PledgeOut(CommunityOut):
+    added: bool
+
+
+class Source(BaseModel):
+    n: int
+    title: str
+    uri: str
+
+
+class AskOut(BaseModel):
+    mode: Literal["ai", "offline"]
+    answer: str
+    sources: list[Source] = Field(default_factory=list)
+    search_queries: list[str] = Field(default_factory=list)
+    suggestions_url: str = ""
+    grounded: bool | None = None
+
+
+class AdvisoryOut(BaseModel):
+    mode: Literal["ai", "offline", "unavailable"]
+    items: list[str]
+    sources: list[Source] = Field(default_factory=list)
+    suggestions_url: str = ""

@@ -82,6 +82,41 @@ def _find_window(points: list[dict], pick_min: bool, today) -> dict | None:
     }
 
 
+PERIOD_HOURS = {
+    "morning": {6, 7, 8, 9, 10},
+    "afternoon": {11, 12, 13, 14, 15, 16},
+    "evening": {17, 18, 19, 20, 21},
+    "night": {22, 23, 0, 1, 2, 3, 4, 5},
+}
+
+
+def _round(value) -> float | None:
+    return round(float(value), 1) if value is not None else None
+
+
+def _india_aqi_from_averages(avg24: dict, avg8: dict) -> dict:
+    """CPCB uses 24-h averages for particles/NO2/SO2 and 8-h averages for O3/CO (CO in mg/m3)."""
+    co_ug = avg8["carbon_monoxide"]
+    inputs = {**avg24, "ozone": avg8["ozone"], "carbon_monoxide": co_ug / 1000 if co_ug is not None else None}
+    india_aqi = compute_aqi(inputs)
+    if india_aqi is None:
+        raise AirDataError("Air data had no usable pollutant values")
+    return india_aqi
+
+
+def _forecast_point(time: str, stamp: datetime, pm25, pm10) -> dict:
+    subs = [s for s in (sub_index("pm2_5", pm25), sub_index("pm10", pm10)) if s is not None]
+    pm_index = max(subs) if subs else None
+    return {
+        "time": time,
+        "dt": stamp,
+        "hour_label": _hour_label(stamp),
+        "pm2_5": _round(pm25),
+        "pm_index": pm_index,
+        "category_key": category_for(pm_index)["key"] if pm_index is not None else None,
+    }
+
+
 def build_snapshot(raw: dict, now_utc: datetime | None = None) -> dict:
     """Turn an Open-Meteo response into the app's air snapshot. Pure function (tested)."""
     hourly = raw.get("hourly") or {}
@@ -89,70 +124,32 @@ def build_snapshot(raw: dict, now_utc: datetime | None = None) -> dict:
     if not times:
         raise AirDataError("No hourly air data returned")
 
-    offset = timedelta(seconds=raw.get("utc_offset_seconds", 0))
     now_utc = now_utc or datetime.now(UTC)
-    now_local = (now_utc + offset).replace(tzinfo=None)
+    now_local = (now_utc + timedelta(seconds=raw.get("utc_offset_seconds", 0))).replace(tzinfo=None)
     stamps = [datetime.fromisoformat(t) for t in times]
-
-    # Index of the latest hour that has started.
-    idx = max((i for i, t in enumerate(stamps) if t <= now_local), default=0)
+    idx = max((i for i, t in enumerate(stamps) if t <= now_local), default=0)  # latest hour that has started
 
     def series(name: str) -> list:
         return hourly.get(name) or [None] * len(times)
 
-    def window(name: str, hours: int) -> list:
+    def last_hours(name: str, hours: int) -> list:
         return series(name)[max(0, idx - hours + 1) : idx + 1]
 
-    avg24 = {p: _avg(window(p, 24)) for p in ["pm2_5", "pm10", "nitrogen_dioxide", "sulphur_dioxide"]}
-    avg8 = {p: _avg(window(p, 8)) for p in ["ozone", "carbon_monoxide"]}
-
-    aqi_inputs = dict(avg24)
-    aqi_inputs["ozone"] = avg8["ozone"]
-    aqi_inputs["carbon_monoxide"] = avg8["carbon_monoxide"] / 1000 if avg8["carbon_monoxide"] is not None else None
-    india_aqi = compute_aqi(aqi_inputs)
-    if india_aqi is None:
-        raise AirDataError("Air data had no usable pollutant values")
-
+    avg24 = {p: _avg(last_hours(p, 24)) for p in ("pm2_5", "pm10", "nitrogen_dioxide", "sulphur_dioxide")}
+    avg8 = {p: _avg(last_hours(p, 8)) for p in ("ozone", "carbon_monoxide")}
     current_block = raw.get("current") or {}
-    current = {}
-    for p in POLLUTANTS:
-        val = current_block.get(p)
-        if val is None:
-            val = series(p)[idx]
-        current[p] = round(float(val), 1) if val is not None else None
+    current = {p: _round(current_block[p] if current_block.get(p) is not None else series(p)[idx]) for p in POLLUTANTS}
 
-    # Next 24 hours, starting from the next hour.
-    forecast = []
-    for i in range(idx + 1, min(idx + 25, len(times))):
-        pm25 = series("pm2_5")[i]
-        pm10 = series("pm10")[i]
-        subs = [s for s in (sub_index("pm2_5", pm25), sub_index("pm10", pm10)) if s is not None]
-        idx_val = max(subs) if subs else None
-        forecast.append(
-            {
-                "time": times[i],
-                "dt": stamps[i],
-                "hour_label": _hour_label(stamps[i]),
-                "pm2_5": round(float(pm25), 1) if pm25 is not None else None,
-                "pm_index": idx_val,
-                "category_key": category_for(idx_val)["key"] if idx_val is not None else None,
-            }
-        )
-
-    def period_avg(hours: set[int]) -> float | None:
-        return _avg([f["pm2_5"] for f in forecast if f["dt"].hour in hours]) or avg24["pm2_5"]
-
+    upcoming = range(idx + 1, min(idx + 25, len(times)))  # next 24 hours
+    forecast = [_forecast_point(times[i], stamps[i], series("pm2_5")[i], series("pm10")[i]) for i in upcoming]
     period_avgs = {
-        "morning": period_avg({6, 7, 8, 9, 10}),
-        "afternoon": period_avg({11, 12, 13, 14, 15, 16}),
-        "evening": period_avg({17, 18, 19, 20, 21}),
-        "night": period_avg({22, 23, 0, 1, 2, 3, 4, 5}),
+        name: _avg([f["pm2_5"] for f in forecast if f["dt"].hour in hours]) or avg24["pm2_5"]
+        for name, hours in PERIOD_HOURS.items()
     }
-
     best = _find_window(forecast, pick_min=True, today=now_local.date())
     worst = _find_window(forecast, pick_min=False, today=now_local.date())
-    for f in forecast:
-        f.pop("dt")
+    for point in forecast:
+        point.pop("dt")
 
     return {
         "source": "open-meteo",
@@ -160,7 +157,7 @@ def build_snapshot(raw: dict, now_utc: datetime | None = None) -> dict:
         "is_model_estimate": True,
         "updated_local": stamps[idx].isoformat(),
         "timezone": raw.get("timezone", "GMT"),
-        "india_aqi": india_aqi,
+        "india_aqi": _india_aqi_from_averages(avg24, avg8),
         "avg24": avg24,
         "current": current,
         "cigarettes_today": cigarettes_for_day(avg24["pm2_5"]),

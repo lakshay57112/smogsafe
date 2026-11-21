@@ -51,21 +51,31 @@ Open **"How we calculate"** in the app footer to see the full table and sources.
 - **AI:** Google **Gemini** (`google-genai` SDK). The daily plan uses structured JSON output with a Pydantic schema; chat and advisories use **Grounding with Google Search**
 - **Air data:** Open-Meteo Air Quality API (CAMS global model, free, no key). Optional **Google Air Quality API** for 500 m current readings and the official CPCB index
 - **Geocoding:** Open-Meteo (city search, India only), OpenStreetMap Nominatim (reverse)
-- **Frontend:** plain HTML, CSS and JavaScript. No framework, no build step, no external scripts
+- **Frontend:** plain HTML, CSS and JavaScript ES modules. No framework, no build step, no external scripts
 - **Storage:** household details in the browser's localStorage; pledges in SQLite (anonymous, salted hashes)
 
 ```
-Browser (HTML/CSS/JS)
-   │  /api/air  /api/plan  /api/ask  /api/advisories  /api/community  /api/impact/*
-   ▼
-FastAPI ──► air_quality.py ──► Open-Meteo (+ Google Air Quality API, optional)
-        ├─► aqi_india.py    (CPCB sub-indices, 24-h / 8-h averages)
-        ├─► impact.py       (exposure, cigarettes, CO₂: deterministic)
-        ├─► household.py    (risk levels + offline fallback plan)
-        ├─► context.py      (compact summaries: exactly what Gemini sees)
-        ├─► gemini.py       (plan JSON · grounded chat · grounded advisories)
-        ├─► planner.py      (attaches computed impacts to each action)
-        └─► community.py    (SQLite pledges)
+app/
+  main.py            app setup: lifespan, middleware, routers, static files
+  security.py        CSP + security headers, body-size limit, rate limits, client IP
+  dependencies.py    shared services (Gemini, pledge store) and live-air loader
+  schemas.py         Pydantic request + response models (also Gemini's JSON schema)
+  routers/
+    air.py           /api/health, /api/air, /api/geocode/*
+    impact.py        /api/impact/* (deterministic calculators)
+    ai.py            /api/plan, /api/ask, /api/advisories, /api/suggestions/*
+    community.py     /api/community, /api/community/pledge
+  services/
+    air_quality.py   Open-Meteo (+ optional Google Air Quality), forecast windows
+    aqi_india.py     CPCB sub-indices, 24-h / 8-h averages
+    impact.py        exposure, cigarettes, CO₂: all the maths
+    context.py       compact summaries: exactly what Gemini sees
+    gemini.py        plan JSON, grounded chat, grounded advisories, fallbacks
+    planner.py       attaches computed impacts to each AI action
+    household.py     risk levels + offline (rule-based) plan
+    community.py     SQLite pledges
+static/js/           16 small ES modules: main, air, plan, chat, calculators, circle, ...
+tests/               pytest suites + tests/js (node:test)
 ```
 
 ## Run it locally
@@ -104,23 +114,27 @@ gcloud run deploy smogsafe --source . --region asia-south1 --allow-unauthenticat
 ## Tests
 
 ```bash
-pytest --cov=app     # 70 tests, ~96% coverage (CI fails below 90%)
+pytest --cov=app                          # 74 Python tests, ~96% coverage (CI fails below 90%)
 ruff check . && ruff format --check .
+npm ci && npm run lint && npm test        # ESLint + 10 frontend unit tests (node:test)
 ```
-Tests cover CPCB AQI breakpoints, impact maths, forecast windows, the Open-Meteo and Google Air Quality clients (network mocked with `httpx.MockTransport`), geocoding, caches and rate limits, Gemini model fallback and search-blocked fallback, citation insertion (UTF-8 byte offsets, Hindi text included), pledge de-duplication, every API route, validation, gzip, plan caching and security headers. GitHub Actions runs lint, format check and tests on every push.
+Tests cover CPCB AQI breakpoints, impact maths, forecast windows, the Open-Meteo and Google Air Quality clients (network mocked with `httpx.MockTransport`), geocoding, caches and rate limits, Gemini model fallback and search-blocked fallback, citation insertion (UTF-8 byte offsets, Hindi text included), pledge de-duplication, every API route, validation, gzip, plan caching and security headers. Frontend tests cover number formatting, time labels, safe links and the markdown parser (including that HTML in AI text stays plain text). GitHub Actions runs both suites, plus linting, on every push.
 
 ## How SmogSafe meets the judging criteria
 
 **Code quality**
-- Small, single-purpose modules: `aqi_india` (CPCB maths), `impact` (exposure/CO₂), `air_quality`, `gemini`, `context` (what the model sees), `planner`, `community`, `geocode`
-- Type hints and docstrings throughout; Pydantic schemas for every request and for Gemini's JSON output
-- `ruff` lint + format enforced in CI; config in `pyproject.toml`
+- Clear layers: routers (HTTP) → services (logic) → pure functions (maths). Each file has one job (see the tree above)
+- Frontend split into 16 small ES modules; pure helpers kept DOM-free so they can be unit-tested
+- Type hints, docstrings and Pydantic request **and** response models (shown in `/api/docs`)
+- Rule tables instead of long if-chains (offline plan, family tips); complexity limits enforced by the linters (mccabe ≤ 10 in Python, ESLint complexity ≤ 12 and ≤ 50 lines per function)
+- `ruff` (Python) and ESLint (JavaScript) enforced in CI
 
 **Security**
 - API keys stay on the server; the browser never sees them
 - Pydantic validates every input; request bodies capped at 16 KB; per-client rate limits on all API routes, tighter on AI routes
-- Strict Content-Security-Policy (`script-src 'self'`), HSTS behind HTTPS, `X-Frame-Options: DENY`, `nosniff`, COOP/CORP, a tight Permissions-Policy
-- Server and AI text rendered with `textContent` (no `innerHTML`); Google Search suggestions shown in a sandboxed iframe with scripts disabled
+- Strict Content-Security-Policy with **no `'unsafe-inline'`** for scripts or styles, HSTS behind HTTPS, `X-Frame-Options: DENY`, `nosniff`, COOP/CORP, a tight Permissions-Policy
+- Server and AI text rendered with `textContent` (no `innerHTML`, no `eval`). Google Search suggestions live on their own page with a separate locked-down CSP, inside a sandboxed iframe with scripts disabled
+- Rate limits key on the IP added by our own proxy, so a faked `X-Forwarded-For` can't dodge them
 - No accounts. Household and health notes stay in the browser; pledges store only a salted hash of a random device id
 - Docker image runs as a non-root user; Dependabot keeps dependencies updated
 
@@ -131,12 +145,13 @@ Tests cover CPCB AQI breakpoints, impact maths, forecast windows, the Open-Meteo
 - Gemini gets a compact context (the AQI summary and headline numbers, not raw data), which keeps prompts small
 
 **Testing**
-- 70 automated tests, ~96% coverage, every external service mocked, run in CI on every push
+- 74 Python tests (~96% coverage) + 10 JavaScript unit tests, every external service mocked, both run in CI on every push
 
 **Accessibility**
 - Passes an automated axe-core scan (WCAG 2.1 A/AA) on every screen with no violations
 - Semantic landmarks, skip link, keyboard tabs (arrow keys, Home/End), labelled inputs, live regions, a screen-reader table behind the chart, visible focus, `prefers-reduced-motion`, and colour is never the only signal
 - Decorative emoji hidden from screen readers; AI answers tagged with the right `lang` (Hindi/Hinglish) so screen readers pronounce them correctly
+- Form errors linked with `aria-describedby` / `aria-invalid`; focus moves to a new plan when it's ready; Windows high-contrast (forced colours) supported
 
 **Problem statement alignment**
 - See the mapping table at the top of this README

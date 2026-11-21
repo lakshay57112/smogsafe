@@ -1,0 +1,15 @@
+{
+  "name": "smogsafe-frontend",
+  "private": true,
+  "type": "module",
+  "description": "Lint and unit tests for the SmogSafe frontend (no build step).",
+  "scripts": {
+    "lint": "eslint static/js tests/js",
+    "test": "node --test tests/js/*.test.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "globals": "^16.0.0"
+  }
+}

@@ -156,6 +156,7 @@ main { padding: 1.25rem 0 2.5rem; }
   background: #fff7ed; border: 1px solid #fed7aa; border-radius: var(--radius-sm);
 }
 .cig strong { font-size: 1.15rem; }
+.cig-text { margin: 0; }
 .aqi-health { margin: .5rem 0; }
 .aqi-meta { display: flex; flex-wrap: wrap; gap: .4rem .9rem; font-size: .88rem; color: var(--muted); margin: .4rem 0 0; padding: 0; list-style: none; }
 .source-note { font-size: .8rem; color: var(--muted); margin: .7rem 0 0; }
@@ -363,6 +364,13 @@ dialog::backdrop { background: rgba(19, 35, 31, .45); }
   .aqi-number { font-size: 2.2rem; }
   .bar-line { grid-template-columns: 5.5rem minmax(0, 1fr) 4.2rem; }
   [role="tab"] { padding: .55rem .8rem; }
+}
+
+/* Windows High Contrast / forced colours: keep controls and highlights visible. */
+@media (forced-colors: active) {
+  .btn, .chip, .chip-btn, [role="tab"], .impact, .window-chip, .risk { border: 1px solid ButtonText; }
+  [role="tab"][aria-selected="true"] { outline: 2px solid Highlight; }
+  .haze { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -177,7 +177,7 @@ def test_responses_are_gzipped_and_static_files_cached(client):
 
 
 def test_general_api_rate_limit(client, monkeypatch):
-    from app.main import api_limiter
+    from app.security import api_limiter
 
     monkeypatch.setattr(api_limiter, "limit", 3)
     codes = [client.get("/api/impact/factors").status_code for _ in range(5)]
@@ -225,12 +225,48 @@ def test_geocode_endpoints_handle_upstream_errors(client, monkeypatch):
 
 
 def test_air_endpoint_reports_upstream_outage(client, monkeypatch):
-    from app import main
+    from app import dependencies
     from app.services.air_quality import AirDataError
 
     async def down(*args, **kwargs):
         raise AirDataError("down")
 
-    monkeypatch.setattr(main, "get_air", down)
+    monkeypatch.setattr(dependencies, "get_air", down)
     r = client.get("/api/air", params={"lat": 28.6, "lon": 77.2})
     assert r.status_code == 503 and "unavailable" in r.json()["detail"]
+
+
+def test_csp_has_no_unsafe_inline(client):
+    csp = client.get("/").headers["content-security-policy"]
+    assert "unsafe-inline" not in csp
+    assert "script-src 'self'" in csp and "style-src 'self'" in csp
+
+
+def test_search_suggestions_are_served_from_an_isolated_page(client, fake_gemini):
+    body = client.post("/api/ask", json={**DELHI, "question": "What if I take the metro?"}).json()
+    url = body["suggestions_url"]
+    assert url.startswith("/api/suggestions/") and "suggestions_html" not in body
+    page = client.get(url)
+    assert page.status_code == 200 and "metro co2" in page.text
+    assert '<base target="_blank">' in page.text
+    assert "default-src 'none'" in page.headers["content-security-policy"]
+    assert page.headers["x-frame-options"] == "SAMEORIGIN"
+    assert client.get("/api/suggestions/" + "x" * 22).status_code == 404
+    assert client.get("/api/suggestions/<script>").status_code in (404, 422)
+
+
+def test_rate_limit_uses_the_proxy_added_ip_not_spoofed_ones():
+    from types import SimpleNamespace
+
+    from app.security import client_ip
+
+    spoofed = SimpleNamespace(headers={"x-forwarded-for": "1.2.3.4, 203.0.113.9"}, client=None)
+    direct = SimpleNamespace(headers={}, client=SimpleNamespace(host="10.0.0.5"))
+    assert client_ip(spoofed) == "203.0.113.9"
+    assert client_ip(direct) == "10.0.0.5"
+
+
+def test_response_models_are_documented(client):
+    schemas = client.get("/api/openapi.json").json()["components"]["schemas"]
+    for name in ("HealthOut", "CommuteOut", "ExposureOut", "CommunityOut", "AskOut", "AdvisoryOut"):
+        assert name in schemas
