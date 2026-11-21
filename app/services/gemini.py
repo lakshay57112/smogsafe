@@ -64,7 +64,19 @@ with the date if known. If nothing recent is found, reply with one bullet saying
 
 
 class AIUnavailable(RuntimeError):
-    pass
+    def __init__(self, message: str, code: int | None = None):
+        super().__init__(message)
+        self.code = code
+
+
+# Errors that usually mean "Google Search grounding isn't allowed for this key"
+# (free-tier keys don't include it on Gemini 3 models) or its quota ran out.
+SEARCH_BLOCKED_CODES = {400, 403, 429}
+NO_SEARCH_NOTE = (
+    "\n\nLive Google Search is not available right now, so answer from your own knowledge and the "
+    "CONTEXT. If the question needs very recent news (today's restrictions, GRAP stage), say you "
+    "can't check live news and point them to official sources."
+)
 
 
 def add_citations(text: str, supports, web_chunk_numbers: dict[int, int]) -> str:
@@ -150,15 +162,16 @@ class GeminiService:
             try:
                 return await self._client.aio.models.generate_content(model=model, contents=contents, config=config)
             except errors.ClientError as exc:
-                # 404 = model name not available for this key; try the fallback model.
+                log.warning("Gemini error %s on %s: %s", exc.code, model, getattr(exc, "message", exc))
+                # 404/400 can mean this model name isn't available for the key; try the fallback model.
                 if exc.code in (400, 404):
-                    log.warning("Gemini model %s failed (%s), trying fallback", model, exc.code)
                     last_exc = exc
                     continue
-                raise AIUnavailable(f"Gemini error {exc.code}") from exc
+                raise AIUnavailable(f"Gemini error {exc.code}", exc.code) from exc
             except errors.APIError as exc:
-                raise AIUnavailable(f"Gemini error {exc.code}") from exc
-        raise AIUnavailable("Gemini model not available") from last_exc
+                log.warning("Gemini error %s on %s: %s", exc.code, model, getattr(exc, "message", exc))
+                raise AIUnavailable(f"Gemini error {exc.code}", exc.code) from exc
+        raise AIUnavailable("Gemini request failed", getattr(last_exc, "code", None)) from last_exc
 
     async def daily_plan(self, context: dict, language: str) -> AIPlan:
         config = types.GenerateContentConfig(
@@ -180,15 +193,22 @@ class GeminiService:
             types.Content(role=turn["role"], parts=[types.Part(text=turn["text"])]) for turn in history
         ]
         contents.append(types.Content(role="user", parts=[types.Part(text=question)]))
-        config = types.GenerateContentConfig(
-            system_instruction=ASK_SYSTEM.format(
-                language=LANGUAGE_NAMES[language], context=json.dumps(context, ensure_ascii=False)
-            ),
+        system = ASK_SYSTEM.format(language=LANGUAGE_NAMES[language], context=json.dumps(context, ensure_ascii=False))
+        grounded_config = types.GenerateContentConfig(
+            system_instruction=system,
             tools=[types.Tool(google_search=types.GoogleSearch())],
             temperature=0.4,
         )
-        resp = await self._generate(contents, config)
-        return extract_grounded(resp)
+        try:
+            resp = await self._generate(contents, grounded_config)
+            return {**extract_grounded(resp), "grounded": True}
+        except AIUnavailable as exc:
+            if exc.code not in SEARCH_BLOCKED_CODES:
+                raise
+            log.warning("Google Search grounding failed (%s); answering without live search", exc.code)
+        plain_config = types.GenerateContentConfig(system_instruction=system + NO_SEARCH_NOTE, temperature=0.4)
+        resp = await self._generate(contents, plain_config)
+        return {**extract_grounded(resp), "grounded": False}
 
     async def advisories(self, place: str, state: str, today: str) -> dict:
         prompt = ADVISORY_PROMPT.format(place=place, state=f", {state}" if state else "", today=today)

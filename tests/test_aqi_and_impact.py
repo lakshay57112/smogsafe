@@ -197,3 +197,27 @@ def test_pledges_are_deduplicated_per_device():
     assert summary["people_pledging_co2_kg_year"] == 2 * 239
     with pytest.raises(ValueError):
         store.add_pledge("Delhi", "not-a-pledge", "device-aaaa-1111")
+
+
+def test_chat_falls_back_without_search_when_grounding_is_blocked():
+    import asyncio
+
+    from google.genai import errors
+
+    from app.services.gemini import GeminiService
+
+    seen_tools = []
+
+    class Models:
+        async def generate_content(self, model, contents, config):
+            seen_tools.append(bool(config.tools))
+            if config.tools:
+                raise errors.ClientError(403, {"error": {"code": 403, "message": "Search not allowed", "status": "PERMISSION_DENIED"}})
+            return SimpleNamespace(text="Metro saves CO2.", candidates=[])
+
+    svc = GeminiService("key", "model-a", "model-b")
+    svc._client = SimpleNamespace(aio=SimpleNamespace(models=Models()))
+    out = asyncio.run(svc.ask("What if I take the metro?", {}, [], "en"))
+    assert out["grounded"] is False
+    assert out["answer"] == "Metro saves CO2."
+    assert seen_tools == [True, False]

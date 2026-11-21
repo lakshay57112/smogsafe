@@ -818,6 +818,7 @@ async function askQuestion(question) {
     typing.remove();
     appendMsg('bot', [
       renderRich(res.answer, res.sources),
+      res.grounded === false ? h('p', { class: 'muted small', text: 'ℹ️ Answered without live Google Search, so it may miss very recent news.' }) : null,
       sourcesList(res.sources),
       res.suggestions_html ? searchChipsFrame(res.suggestions_html) : null,
     ]);

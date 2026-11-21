@@ -19,7 +19,7 @@ from app.services import geocode
 from app.services.air_quality import AirDataError, get_air
 from app.services.cache import RateLimiter, TTLCache
 from app.services.community import CommunityStore
-from app.services.gemini import AIUnavailable, GeminiService
+from app.services.gemini import SEARCH_BLOCKED_CODES, AIUnavailable, GeminiService
 from app.services.household import member_tips, member_risk, offline_plan
 from app.services.impact import (
     BREATHING_M3_PER_HOUR,
@@ -49,6 +49,11 @@ CSP = (
 ai_limiter = RateLimiter(settings.ai_requests_per_minute, 60)
 pledge_limiter = RateLimiter(20, 60)
 advisory_cache = TTLCache(30 * 60)
+
+OFFICIAL_SOURCES = [
+    {"n": 1, "title": "CPCB live AQI dashboard", "uri": "https://airquality.cpcb.gov.in/AQI_India/"},
+    {"n": 2, "title": "CAQM (GRAP orders for Delhi NCR)", "uri": "https://caqm.nic.in/"},
+]
 
 
 @asynccontextmanager
@@ -326,8 +331,22 @@ async def advisories(
     try:
         result = await gemini.advisories(city_c, state_c, datetime.now().strftime("%d %B %Y"))
     except AIUnavailable as exc:
-        log.warning("Advisories failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Couldn't fetch advisories right now.")
+        log.warning("Advisories failed (code %s): %s", exc.code, exc)
+        reason = (
+            "Live advisories use Google Search inside Gemini, which this API key can't use right now "
+            "(free-tier keys don't include it)."
+            if exc.code in SEARCH_BLOCKED_CODES
+            else "Live advisories couldn't be fetched right now."
+        )
+        return {
+            "mode": "unavailable",
+            "items": [
+                reason,
+                "For official alerts, check CPCB's Sameer app, your State Pollution Control Board, or CAQM's GRAP orders if you're in Delhi NCR.",
+            ],
+            "sources": OFFICIAL_SOURCES,
+            "suggestions_html": "",
+        }
     payload = {"mode": "ai", **result}
     advisory_cache.set(key, payload)
     return payload

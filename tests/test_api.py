@@ -118,3 +118,21 @@ def test_rate_limit(client, fake_gemini):
 def test_large_body_rejected(client):
     r = client.post("/api/ask", content="x" * 20000, headers={"content-type": "application/json"})
     assert r.status_code == 413
+
+
+def test_advisories_explain_when_search_is_blocked(client):
+    from app.services.gemini import AIUnavailable
+
+    class BlockedGemini:
+        available = True
+
+        async def advisories(self, place, state, today):
+            raise AIUnavailable("Gemini error 403", 403)
+
+    client.app.state.gemini = BlockedGemini()
+    r = client.get("/api/advisories", params={"city": "Delhi", "state": "Delhi"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "unavailable"
+    assert "free-tier" in body["items"][0]
+    assert body["sources"][0]["uri"].startswith("https://")
