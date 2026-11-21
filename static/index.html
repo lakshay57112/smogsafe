@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en" data-aqi="unknown">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmogSafe: smog-season companion for Indian families</title>
+  <meta name="description" content="Live Indian AQI for your city, an AI daily plan for your family, indoor air tips and the real impact of your choices during winter smog.">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/styles.css">
+  <script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <div class="haze" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="/" aria-label="SmogSafe home">
+        <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+          <circle cx="20" cy="20" r="19" fill="#0f766e"/>
+          <path d="M11 24c3-6 7-7 9-7s6 1 9 7" fill="none" stroke="#ecfdf5" stroke-width="2.6" stroke-linecap="round"/>
+          <path d="M14 17c2-3 4-4 6-4s4 1 6 4" fill="none" stroke="#99f6e4" stroke-width="2.2" stroke-linecap="round"/>
+          <circle cx="20" cy="27" r="2.2" fill="#ecfdf5"/>
+        </svg>
+        <span class="brand-text">
+          <span class="brand-name">SmogSafe</span>
+          <span class="brand-tag">Breathe easier in smog season</span>
+        </span>
+      </a>
+      <div class="header-controls">
+        <button type="button" class="chip-btn" id="location-btn" aria-haspopup="dialog">
+          <span aria-hidden="true">📍</span> <span id="location-name">Find my air</span>
+        </button>
+        <label class="sr-only" for="lang-select">Language for AI answers</label>
+        <select id="lang-select" class="select-sm">
+          <option value="en">English</option>
+          <option value="hi">हिन्दी</option>
+          <option value="hinglish">Hinglish</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+    <!-- Air now + forecast -->
+    <section class="hero" aria-labelledby="air-heading">
+      <article class="card aqi-card" id="aqi-card" aria-live="polite" aria-busy="true">
+        <h1 id="air-heading" class="eyebrow">Air right now in <span id="air-place">your area</span></h1>
+        <div id="aqi-body" class="aqi-body">
+          <div class="welcome" id="welcome">
+            <p class="welcome-title">Let's check the air you're breathing.</p>
+            <p>Share your location or search your city to get your live Indian AQI and a plan for your family.</p>
+            <div class="btn-row">
+              <button type="button" class="btn btn-primary" id="use-location">📍 Use my location</button>
+              <button type="button" class="btn btn-ghost" id="search-city">🔎 Search city</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card forecast-card" aria-labelledby="forecast-heading">
+        <h2 id="forecast-heading" class="eyebrow">Next 24 hours · PM2.5</h2>
+        <figure id="forecast-figure" class="forecast-figure">
+          <div class="skeleton skeleton-chart" aria-hidden="true"></div>
+        </figure>
+        <div id="windows" class="windows"></div>
+      </article>
+    </section>
+
+    <!-- Tabs -->
+    <nav class="tabs" aria-label="SmogSafe sections">
+      <div role="tablist" aria-label="Sections" class="tablist" id="tablist">
+        <button role="tab" id="tab-plan" aria-controls="panel-plan" aria-selected="true" tabindex="0">🗓️ Today's plan</button>
+        <button role="tab" id="tab-family" aria-controls="panel-family" aria-selected="false" tabindex="-1">👨‍👩‍👧 Family</button>
+        <button role="tab" id="tab-whatif" aria-controls="panel-whatif" aria-selected="false" tabindex="-1">💬 What-if</button>
+        <button role="tab" id="tab-circle" aria-controls="panel-circle" aria-selected="false" tabindex="-1">🤝 Smog Circle</button>
+      </div>
+    </nav>
+
+    <!-- Today's plan -->
+    <section role="tabpanel" id="panel-plan" aria-labelledby="tab-plan" class="panel" tabindex="0">
+      <details class="card household" id="household-details">
+        <summary><span class="summary-title">🏠 Your household</span> <span class="muted" id="household-summary">Tell us a little so tips fit your life</span></summary>
+        <form id="household-form" class="form-grid" novalidate>
+          <div class="field">
+            <label for="hh-commute">Daily commute</label>
+            <select id="hh-commute" name="commute_mode">
+              <option value="car_solo">Car (alone)</option>
+              <option value="car_pool">Carpool</option>
+              <option value="cab">Cab / taxi</option>
+              <option value="auto">Auto-rickshaw</option>
+              <option value="two_wheeler">Petrol two-wheeler</option>
+              <option value="e_two_wheeler">Electric two-wheeler</option>
+              <option value="bus">Bus</option>
+              <option value="metro" selected>Metro</option>
+              <option value="walk_cycle">Walk / cycle</option>
+              <option value="work_from_home">Work from home</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="hh-km">One-way distance (km)</label>
+            <input id="hh-km" name="commute_km" type="number" min="0" max="150" step="0.5" value="8" inputmode="decimal">
+          </div>
+          <div class="field">
+            <label for="hh-days">Days per week</label>
+            <input id="hh-days" name="commute_days" type="number" min="0" max="7" step="1" value="5" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label for="hh-fuel">Cooking fuel</label>
+            <select id="hh-fuel" name="cooking_fuel">
+              <option value="lpg">LPG cylinder</option>
+              <option value="png">Piped gas (PNG)</option>
+              <option value="electric">Electric / induction</option>
+              <option value="biomass">Wood / chulha</option>
+              <option value="kerosene">Kerosene</option>
+            </select>
+          </div>
+          <fieldset class="field checks">
+            <legend>At home</legend>
+            <label><input type="checkbox" name="has_purifier"> We have an air purifier</label>
+            <label><input type="checkbox" name="near_busy_road"> We live near a busy road</label>
+            <label><input type="checkbox" name="exercises_outdoors"> Someone exercises outdoors</label>
+          </fieldset>
+          <div class="field form-actions">
+            <button type="submit" class="btn btn-primary">Save &amp; make my plan</button>
+            <button type="button" class="btn btn-link" data-goto="family">Add family members →</button>
+          </div>
+        </form>
+      </details>
+
+      <div class="plan-cta card" id="plan-cta">
+        <div>
+          <h2 class="h2">Your smog plan for today</h2>
+          <p class="muted">Built from live air data, your household and the cleanest hours ahead.</p>
+        </div>
+        <button type="button" class="btn btn-primary btn-lg" id="make-plan">✨ Make my plan</button>
+      </div>
+
+      <div id="plan-output" class="plan-output" aria-live="polite"></div>
+    </section>
+
+    <!-- Family -->
+    <section role="tabpanel" id="panel-family" aria-labelledby="tab-family" class="panel" tabindex="0" hidden>
+      <div class="grid-2">
+        <article class="card">
+          <h2 class="h2">Who lives with you?</h2>
+          <p class="muted">Kids, elders and people with asthma or heart conditions need extra care in smog. Details stay on this device.</p>
+          <ul id="member-list" class="member-list" aria-live="polite"></ul>
+          <form id="member-form" class="form-grid compact" novalidate>
+            <div class="field">
+              <label for="m-name">Name or nickname</label>
+              <input id="m-name" name="name" maxlength="40" required autocomplete="off" placeholder="e.g. Nani">
+            </div>
+            <div class="field">
+              <label for="m-age">Age group</label>
+              <select id="m-age" name="age_group">
+                <option value="infant">Baby (0–2)</option>
+                <option value="child">Child (3–12)</option>
+                <option value="teen">Teen (13–17)</option>
+                <option value="adult" selected>Adult</option>
+                <option value="senior">Senior (60+)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="m-outdoor">Time outdoors</label>
+              <select id="m-outdoor" name="outdoor_time">
+                <option value="low">Mostly indoors</option>
+                <option value="medium" selected>Some</option>
+                <option value="high">A lot (work, sports, school)</option>
+              </select>
+            </div>
+            <fieldset class="field checks span-2">
+              <legend>Health notes (optional)</legend>
+              <label><input type="checkbox" name="conditions" value="asthma"> Asthma</label>
+              <label><input type="checkbox" name="conditions" value="copd"> COPD / lung disease</label>
+              <label><input type="checkbox" name="conditions" value="heart"> Heart condition</label>
+              <label><input type="checkbox" name="conditions" value="pregnant"> Pregnant</label>
+              <label><input type="checkbox" name="conditions" value="allergies"> Allergies</label>
+              <label><input type="checkbox" name="conditions" value="diabetes"> Diabetes</label>
+            </fieldset>
+            <div class="field form-actions span-2">
+              <button type="submit" class="btn btn-primary">Add member</button>
+              <p class="form-error" id="member-error" role="alert"></p>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2 class="h2">Advice for each person</h2>
+            <button type="button" class="btn btn-ghost btn-sm" id="refresh-family">Update advice</button>
+          </div>
+          <div id="family-advice" aria-live="polite">
+            <p class="muted empty">Add family members, then tap <strong>Update advice</strong>.</p>
+          </div>
+          <h3 class="h3">Tonight's indoor-air checklist</h3>
+          <ul id="family-checklist" class="checklist"></ul>
+        </article>
+      </div>
+    </section>
+
+    <!-- What-if -->
+    <section role="tabpanel" id="panel-whatif" aria-labelledby="tab-whatif" class="panel" tabindex="0" hidden>
+      <div class="grid-2 whatif-grid">
+        <article class="card chat-card">
+          <h2 class="h2">Ask SmogSafe</h2>
+          <p class="muted">Ask "what if…" about your choices. Answers use today's air in your city plus <strong>live Google Search</strong>, with sources.</p>
+          <div class="suggestions" id="chat-suggestions">
+            <button type="button" class="chip">What if I take the metro 3 days a week?</button>
+            <button type="button" class="chip">Is it safe for my kids to play outside today?</button>
+            <button type="button" class="chip">What size air purifier for a 12×12 ft bedroom?</button>
+            <button type="button" class="chip">What restrictions are in force in my city right now?</button>
+            <button type="button" class="chip">Do indoor plants really clean the air?</button>
+          </div>
+          <div id="chat-log" class="chat-log" role="log" aria-live="polite" aria-label="Conversation"></div>
+          <form id="chat-form" class="chat-form">
+            <label for="chat-input" class="sr-only">Your question</label>
+            <input id="chat-input" name="q" maxlength="500" autocomplete="off" placeholder="e.g. What if we stop burning leaves in our colony?" required>
+            <button type="submit" class="btn btn-primary" id="chat-send">Ask</button>
+          </form>
+        </article>
+
+        <div class="stack">
+          <article class="card calc">
+            <h2 class="h2">🚇 Commute switch</h2>
+            <form id="commute-calc" class="form-grid compact" novalidate>
+              <div class="field">
+                <label for="c-from">From</label>
+                <select id="c-from" name="from_mode"></select>
+              </div>
+              <div class="field">
+                <label for="c-to">To</label>
+                <select id="c-to" name="to_mode"></select>
+              </div>
+              <div class="field">
+                <label for="c-km">One-way km: <output id="c-km-out">10</output></label>
+                <input id="c-km" name="km_one_way" type="range" min="1" max="50" step="1" value="10">
+              </div>
+              <div class="field">
+                <label for="c-days">Days a week: <output id="c-days-out">3</output></label>
+                <input id="c-days" name="days_per_week" type="range" min="1" max="7" step="1" value="3">
+              </div>
+            </form>
+            <div id="commute-result" class="calc-result" aria-live="polite"></div>
+          </article>
+
+          <article class="card calc">
+            <h2 class="h2">🫁 Smog you breathe</h2>
+            <form id="exposure-calc" class="form-grid compact" novalidate>
+              <div class="field">
+                <label for="e-activity">Activity</label>
+                <select id="e-activity" name="activity">
+                  <option value="rest">Resting / sleeping</option>
+                  <option value="light" selected>Walking, chores</option>
+                  <option value="moderate">Brisk walk, cycling</option>
+                  <option value="vigorous">Running, sports</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="e-minutes">Minutes: <output id="e-minutes-out">45</output></label>
+                <input id="e-minutes" name="minutes" type="range" min="10" max="240" step="5" value="45">
+              </div>
+              <div class="field">
+                <label for="e-from">Instead of</label>
+                <select id="e-from" name="from_setting">
+                  <option value="outdoors" selected>Outdoors</option>
+                  <option value="indoors_windows_open">Indoors, windows open</option>
+                  <option value="indoors_windows_closed">Indoors, windows closed</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="e-to">Do it</label>
+                <select id="e-to" name="to_setting">
+                  <option value="outdoors">Outdoors</option>
+                  <option value="indoors_windows_closed" selected>Indoors, windows closed</option>
+                  <option value="indoors_with_purifier">Indoors with purifier</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="e-mask">Mask</label>
+                <select id="e-mask" name="to_mask">
+                  <option value="none" selected>No mask</option>
+                  <option value="cloth">Cloth mask</option>
+                  <option value="surgical">Surgical mask</option>
+                  <option value="n95">Fitted N95</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="e-pm">PM2.5 (µg/m³)</label>
+                <input id="e-pm" name="pm25" type="number" min="0" max="2000" step="1" value="150" inputmode="numeric">
+              </div>
+            </form>
+            <div id="exposure-result" class="calc-result" aria-live="polite"></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Smog Circle -->
+    <section role="tabpanel" id="panel-circle" aria-labelledby="tab-circle" class="panel" tabindex="0" hidden>
+      <div class="grid-2">
+        <article class="card">
+          <h2 class="h2">Smog Circle · <span id="circle-city">your city</span></h2>
+          <p class="muted">Small promises, added up across your city. Anonymous, no sign-up.</p>
+          <div class="counters" id="circle-counters" aria-live="polite"></div>
+          <ul class="pledges" id="pledge-list"></ul>
+        </article>
+        <div class="stack">
+          <article class="card">
+            <div class="card-head">
+              <h2 class="h2">📰 Latest local advisories</h2>
+              <button type="button" class="btn btn-ghost btn-sm" id="refresh-advisories">Check now</button>
+            </div>
+            <p class="muted small">Found with live Google Search. Always confirm with official sources.</p>
+            <div id="advisories" aria-live="polite"></div>
+          </article>
+          <article class="card">
+            <h2 class="h2">🙋 Act locally</h2>
+            <ul class="links">
+              <li><strong>See burning? Report it</strong> on CPCB's <em>Sameer</em> app (search "Sameer CPCB" on your app store).</li>
+              <li><strong>Official station readings:</strong> <a href="https://airquality.cpcb.gov.in/AQI_India/" target="_blank" rel="noopener noreferrer">CPCB AQI dashboard</a></li>
+              <li><strong>Compost, don't burn</strong> dry leaves. Ask your RWA for a shared compost pit.</li>
+              <li><strong>Start a carpool group</strong> in your society WhatsApp. Share the Smog Circle counter there.</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <p>Air data: <span id="data-source">Open-Meteo (CAMS)</span>. AQI follows the CPCB National AQI method. Impact maths uses Berkeley Earth and TERI figures.
+        <button type="button" class="btn-link" id="open-factors">How we calculate</button></p>
+      <p class="muted small">SmogSafe gives general guidance, not medical advice. Your household details are stored only in this browser.</p>
+    </div>
+  </footer>
+
+  <!-- City search -->
+  <dialog id="city-dialog" aria-labelledby="city-dialog-title">
+    <form method="dialog" class="dialog-inner" id="city-form">
+      <div class="dialog-head">
+        <h2 id="city-dialog-title" class="h2">Choose your city</h2>
+        <button type="submit" value="cancel" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <button type="button" class="btn btn-ghost full" id="dialog-use-location">📍 Use my current location</button>
+      <label for="city-input">Search Indian cities</label>
+      <input id="city-input" type="search" autocomplete="off" placeholder="e.g. Lucknow, Gurugram, Ludhiana" maxlength="60">
+      <ul id="city-results" class="city-results" aria-label="Matching cities" aria-live="polite"></ul>
+    </form>
+  </dialog>
+
+  <!-- How we calculate -->
+  <dialog id="factors-dialog" aria-labelledby="factors-title">
+    <form method="dialog" class="dialog-inner wide">
+      <div class="dialog-head">
+        <h2 id="factors-title" class="h2">How SmogSafe calculates impact</h2>
+        <button type="submit" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <div id="factors-body"><p class="muted">Loading…</p></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
